@@ -43,7 +43,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   }
 
   // MARK: - Timeout
-  override func setTimeout(id: Double, duration: Double, callback: @escaping (Double) -> Void) -> Double {
+  func setTimeout(id: Double, duration: Double, callback: @escaping (Double) -> Void) -> Double {
     let intId = Int(id)
     
     serialQueue.async { [weak self] in
@@ -76,7 +76,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     return id
   }
 
-  override func clearTimeout(id: Double) {
+  func clearTimeout(id: Double) {
     let intId = Int(id)
     
     serialQueue.async { [weak self] in
@@ -93,7 +93,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   }
 
   // MARK: - Interval
-  override func setInterval(id: Double, interval: Double, callback: @escaping (Double) -> Void) -> Double {
+  func setInterval(id: Double, interval: Double, callback: @escaping (Double) -> Void) -> Double {
     let intId = Int(id)
     
     serialQueue.async { [weak self] in
@@ -118,7 +118,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     return id
   }
 
-  override func clearInterval(id: Double) {
+  func clearInterval(id: Double) {
     let intId = Int(id)
     
     serialQueue.async { [weak self] in
