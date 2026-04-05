@@ -51,7 +51,9 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
       
       DispatchQueue.main.async {
         // Clear existing timer with same ID
-        self.clearTimeout(id: id)
+        if (self.timeoutTimers[intId] != nil){
+          self.clearTimeout(id: id)
+        }
         self.acquireBackgroundTask()
 
         let timer = Timer.scheduledTimer(withTimeInterval: duration / 1000.0, repeats: false) { [weak self] _ in
@@ -101,7 +103,9 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
       
       DispatchQueue.main.async {
         // Clear existing timer with same ID
-        self.clearInterval(id: id)
+        if (self.intervalTimers[intId] != nil){
+          self.clearInterval(id: id)
+        }
         self.acquireBackgroundTask()
 
         let timer = Timer.scheduledTimer(withTimeInterval: interval / 1000.0, repeats: true) { [weak self] _ in
