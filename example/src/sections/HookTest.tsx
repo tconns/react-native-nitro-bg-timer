@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { Section } from '../components/Section'
 import { useLog } from '../context/LogContext'
@@ -6,15 +6,15 @@ import { useBackgroundTimer } from '../hooks/useBackgroundTimer'
 
 export function HookTest() {
   const [count, setCount] = useState(0)
+  const countRef = useRef(0)
   const { addLog } = useLog()
 
   const { start, stop, restart, isRunning } = useBackgroundTimer(
     () => {
-      setCount((prev) => {
-        const next = prev + 1
-        addLog(`[Hook] Tick #${next}`)
-        return next
-      })
+      countRef.current += 1
+      const next = countRef.current
+      setCount(next)
+      addLog(`[Hook] Tick #${next}`)
     },
     1000,
     false
@@ -49,7 +49,14 @@ export function HookTest() {
         >
           <Text style={styles.btnText}>Stop</Text>
         </Pressable>
-        <Pressable style={[styles.btn, styles.btnBlue]} onPress={restart}>
+        <Pressable
+          style={[styles.btn, styles.btnBlue]}
+          onPress={() => {
+            countRef.current = 0
+            setCount(0)
+            restart()
+          }}
+        >
           <Text style={styles.btnText}>Restart</Text>
         </Pressable>
       </View>
