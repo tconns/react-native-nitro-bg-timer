@@ -7,10 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Example app with 7 test sections (SetTimeout, SetInterval, Background, Concurrent, Cleanup, Hook, Stress)
+- `useBackgroundTimer` custom hook in example app
+
 ### Changed
 
+- Upgraded Nitro Modules from 0.29.3 to 0.35.0
+- Upgraded React Native to 0.84.1
 - Updated `moduleResolution` to `Bundler` in tsconfig.json
 - Upgraded Yarn to modern version with `nodeLinker: node-modules`
+- Updated Podfile.lock with `react-native-safe-area-context`
+
+### Fixed
+
+- Fixed iOS timer race condition (main-thread dispatch, same-ID timer overwrites)
+- Fixed HookTest render error in example app
+- Fixed native bugs surfaced during React Native 0.84.1 upgrade
 
 ### Security
 

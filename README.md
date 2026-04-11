@@ -43,15 +43,6 @@ Add background processing capability to your `Info.plist`:
 </array>
 ```
 
-For background tasks to work properly, you may also need to register background task identifiers in your `Info.plist`:
-
-```xml
-<key>BGTaskSchedulerPermittedIdentifiers</key>
-<array>
-    <string>com.yourapp.background-timer</string>
-</array>
-```
-
 ### Android
 
 Add the following permissions to your `android/app/src/main/AndroidManifest.xml`:
@@ -407,17 +398,14 @@ BackgroundTimer.setInterval(() => {
 
 ### Android Implementation Details
 
-- ✅ Full support with foreground service
-- ✅ Battery optimization handling
-- ✅ Doze mode compatibility
-- ✅ Works with Android 12+ background restrictions
+- ✅ Background execution via `PowerManager.PARTIAL_WAKE_LOCK`
+- ✅ Automatic WakeLock lifecycle management
 
 ### iOS Implementation Details
 
-- ✅ Full support with background task API
-- ✅ Background app refresh integration
-- ✅ iOS 13+ background processing
+- ✅ Background execution via `UIApplication.beginBackgroundTask`
 - ✅ Automatic task expiration handling
+- ✅ Main-thread timer dispatch to prevent race conditions
 
 ## Troubleshooting
 
@@ -506,7 +494,7 @@ See `CONTRIBUTING.md` for contribution workflow.
 When updating spec files in `src/specs/*.nitro.ts`, regenerate Nitro artifacts:
 
 ```bash
-npx nitro-codegen
+yarn nitrogen
 ```
 
 ## Project Structure
