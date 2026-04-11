@@ -143,5 +143,9 @@
   },
   "dependencies": {
     "eventemitter3": "^5.0.1"
+  },
+  "resolutions": {
+    "cacache/tar": "^7.5.11",
+    "node-gyp/tar": "^7.5.11"
   }
 }
