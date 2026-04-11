@@ -135,19 +135,24 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   }
 
   deinit {
-    serialQueue.sync {
-      DispatchQueue.main.sync {
-        // Invalidate all timers
-        timeoutTimers.values.forEach { $0.invalidate() }
-        intervalTimers.values.forEach { $0.invalidate() }
-        
-        // Clear collections
-        timeoutTimers.removeAll()
-        intervalTimers.removeAll()
-        
-        // Release background task
-        releaseBackgroundTask()
+    // Copy out all values so the closure does not capture self (which has refcount 0 during deinit).
+    // Dictionary is a value type in Swift, so this is a safe copy.
+    let timeouts = timeoutTimers
+    let intervals = intervalTimers
+    let task = bgTask
+
+    let doCleanup = {
+      timeouts.values.forEach { $0.invalidate() }
+      intervals.values.forEach { $0.invalidate() }
+      if task != .invalid {
+        UIApplication.shared.endBackgroundTask(task)
       }
+    }
+
+    if Thread.isMainThread {
+      doCleanup()
+    } else {
+      DispatchQueue.main.sync { doCleanup() }
     }
   }
 }

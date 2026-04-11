@@ -488,6 +488,17 @@ import { BackgroundTimer } from 'react-native-nitro-bg-timer'
 // The rest of your code should work the same
 ```
 
+## Example App
+
+Clone the repo and run:
+
+```bash
+yarn install
+yarn example:ios    # or yarn example:android
+```
+
+The example app exercises all library use cases including background timer validation, concurrent timers, cleanup verification, and stress testing.
+
 ## Contributing
 
 See `CONTRIBUTING.md` for contribution workflow.

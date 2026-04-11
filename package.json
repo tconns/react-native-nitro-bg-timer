@@ -1,6 +1,10 @@
 {
   "name": "react-native-nitro-bg-timer",
   "version": "0.1.0",
+  "workspaces": [
+    ".",
+    "example"
+  ],
   "description": "react-native-nitro-bg-timer is a react native package built with Nitro",
   "main": "lib/index",
   "module": "lib/index",
@@ -35,7 +39,11 @@
     "lint-ci": "eslint \"**/*.{js,ts,tsx}\" -f @jamesacarr/github-actions",
     "typescript": "tsc",
     "specs": "typescript && nitrogen --logLevel=\"debug\"",
-    "nitrogen": "nitrogen"
+    "nitrogen": "nitrogen",
+    "example:start": "yarn --cwd example start",
+    "example:android": "yarn --cwd example android",
+    "example:ios": "yarn --cwd example ios",
+    "example:pods": "cd example/ios && pod install"
   },
   "keywords": [
     "react-native",
