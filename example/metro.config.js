@@ -4,7 +4,11 @@ const fs = require('fs')
 const pak = require('../package.json')
 
 const root = path.resolve(__dirname, '..')
-const modules = Object.keys({ ...pak.peerDependencies })
+const examplePak = require('./package.json')
+const modules = [
+  ...Object.keys(pak.peerDependencies || {}),
+  ...Object.keys(examplePak.dependencies || {}),
+]
 
 // Resolve each peer dependency to wherever Yarn hoisted it
 // (could be example/node_modules or root/node_modules)
@@ -14,6 +18,9 @@ const extraNodeModules = modules.reduce((acc, name) => {
   acc[name] = fs.existsSync(local) ? local : hoisted
   return acc
 }, {})
+
+// Resolve the library itself (workspace root)
+extraNodeModules[pak.name] = root
 
 /**
  * Metro configuration

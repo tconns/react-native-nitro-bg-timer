@@ -7,6 +7,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import com.margelo.nitro.NitroModules
+import java.util.concurrent.ConcurrentHashMap
 
 @DoNotStrip
 class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
@@ -19,8 +20,8 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
   private val wakeLock: PowerManager.WakeLock =
     powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NitroBackgroundTimer")
 
-  private val timeoutRunnables = HashMap<Int, Runnable>()
-  private val intervalRunnables = HashMap<Int, Runnable>()
+  private val timeoutRunnables = ConcurrentHashMap<Int, Runnable>()
+  private val intervalRunnables = ConcurrentHashMap<Int, Runnable>()
 
   // --- WakeLock helpers ---
   @SuppressLint("WakelockTimeout")
@@ -77,7 +78,10 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
         } catch (e: Exception) {
           Log.e("NitroBackgroundTimer", "Callback error in setInterval($id): ${e.message}", e)
         }
-        handler.postDelayed(this, interval.toLong())
+        // Only reschedule if this interval is still registered (not cleared)
+        if (intervalRunnables.containsKey(intId)) {
+          handler.postDelayed(this, interval.toLong())
+        }
       }
     }
 

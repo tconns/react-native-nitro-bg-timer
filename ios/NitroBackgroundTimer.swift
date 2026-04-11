@@ -56,7 +56,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
 
       self.acquireBackgroundTask()
 
-      let timer = Timer.scheduledTimer(withTimeInterval: duration / 1000.0, repeats: false) { [weak self] _ in
+      let timer = Timer(timeInterval: duration / 1000.0, repeats: false) { [weak self] _ in
         guard let self = self else { return }
 
         callback(id)
@@ -64,6 +64,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
         self.timeoutTimers.removeValue(forKey: intId)
         self.releaseBackgroundTaskIfNeeded()
       }
+      RunLoop.main.add(timer, forMode: .common)
 
       self.timeoutTimers[intId] = timer
     }
@@ -100,11 +101,13 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
 
       self.acquireBackgroundTask()
 
-      let timer = Timer.scheduledTimer(withTimeInterval: interval / 1000.0, repeats: true) { [weak self] _ in
+      let timer = Timer(timeInterval: interval / 1000.0, repeats: true) { [weak self] _ in
         guard let self = self else { return }
+        guard self.intervalTimers[intId] != nil else { return }
 
         callback(id)
       }
+      RunLoop.main.add(timer, forMode: .common)
 
       self.intervalTimers[intId] = timer
     }
@@ -144,6 +147,8 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     if Thread.isMainThread {
       doCleanup()
     } else {
+      // sync ensures all timers are invalidated and bgTask ended before dealloc completes.
+      // Deadlock-safe: this branch only runs when NOT on the main thread.
       DispatchQueue.main.sync { doCleanup() }
     }
   }

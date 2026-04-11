@@ -1,12 +1,12 @@
 import React from 'react'
 import {
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native'
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context'
 import { LogProvider } from './src/context/LogContext'
 import { LogView } from './src/components/LogView'
 import { SetTimeoutTest } from './src/sections/SetTimeoutTest'
@@ -19,6 +19,7 @@ import { StressTest } from './src/sections/StressTest'
 
 function App() {
   return (
+    <SafeAreaProvider>
     <LogProvider>
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="dark-content" />
@@ -42,6 +43,7 @@ function App() {
         </ScrollView>
       </SafeAreaView>
     </LogProvider>
+    </SafeAreaProvider>
   )
 }
 
