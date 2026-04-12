@@ -85,7 +85,6 @@
     "react-native": "0.84.1",
     "react-native-builder-bob": "^0.37.0",
     "react-native-nitro-modules": "^0.35.0",
-    "semantic-release": "^24.2.6",
     "typescript": "^5.8.0"
   },
   "peerDependencies": {
@@ -143,9 +142,5 @@
   },
   "dependencies": {
     "eventemitter3": "^5.0.1"
-  },
-  "resolutions": {
-    "cacache/tar": "^7.5.11",
-    "node-gyp/tar": "^7.5.11"
   }
 }
