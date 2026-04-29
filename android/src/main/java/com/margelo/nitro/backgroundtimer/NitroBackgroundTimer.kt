@@ -21,18 +21,23 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
 
   private val timeoutRunnables = HashMap<Int, Runnable>()
   private val intervalRunnables = HashMap<Int, Runnable>()
+  private val stateLock = Any()
 
   // --- WakeLock helpers ---
   @SuppressLint("WakelockTimeout")
   private fun acquireWakeLock() {
-    if (!wakeLock.isHeld) {
-      wakeLock.acquire()
+    synchronized(stateLock) {
+      if (!wakeLock.isHeld) {
+        wakeLock.acquire()
+      }
     }
   }
 
   private fun releaseWakeLockIfNeeded() {
-    if (timeoutRunnables.isEmpty() && intervalRunnables.isEmpty() && wakeLock.isHeld) {
-      wakeLock.release()
+    synchronized(stateLock) {
+      if (timeoutRunnables.isEmpty() && intervalRunnables.isEmpty() && wakeLock.isHeld) {
+        wakeLock.release()
+      }
     }
   }
 
@@ -48,19 +53,25 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
       } catch (e: Exception) {
         Log.e("NitroBackgroundTimer", "Callback error in setTimeout($id): ${e.message}", e)
       }
-      timeoutRunnables.remove(intId)
+      synchronized(stateLock) {
+        timeoutRunnables.remove(intId)
+      }
       releaseWakeLockIfNeeded()
     }
 
-    timeoutRunnables[intId] = runnable
+    synchronized(stateLock) {
+      timeoutRunnables[intId] = runnable
+    }
     handler.postDelayed(runnable, duration.toLong())
     return id
   }
 
   override fun clearTimeout(id: Double) {
     val intId = id.toInt()
-    timeoutRunnables[intId]?.let { handler.removeCallbacks(it) }
-    timeoutRunnables.remove(intId)
+    synchronized(stateLock) {
+      timeoutRunnables[intId]?.let { handler.removeCallbacks(it) }
+      timeoutRunnables.remove(intId)
+    }
     releaseWakeLockIfNeeded()
   }
 
@@ -72,33 +83,50 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     acquireWakeLock()
     val runnable = object : Runnable {
       override fun run() {
+        synchronized(stateLock) {
+          // Timer was cleared/replaced while this callback was pending.
+          if (intervalRunnables[intId] !== this) return
+        }
+
         try {
           callback(id)
         } catch (e: Exception) {
           Log.e("NitroBackgroundTimer", "Callback error in setInterval($id): ${e.message}", e)
         }
-        handler.postDelayed(this, interval.toLong())
+
+        synchronized(stateLock) {
+          // Avoid resurrecting an interval that was cleared during callback execution.
+          if (intervalRunnables[intId] === this) {
+            handler.postDelayed(this, interval.toLong())
+          }
+        }
       }
     }
 
-    intervalRunnables[intId] = runnable
+    synchronized(stateLock) {
+      intervalRunnables[intId] = runnable
+    }
     handler.postDelayed(runnable, interval.toLong())
     return id
   }
 
   override fun clearInterval(id: Double) {
     val intId = id.toInt()
-    intervalRunnables[intId]?.let { handler.removeCallbacks(it) }
-    intervalRunnables.remove(intId)
+    synchronized(stateLock) {
+      intervalRunnables[intId]?.let { handler.removeCallbacks(it) }
+      intervalRunnables.remove(intId)
+    }
     releaseWakeLockIfNeeded()
   }
 
   // --- Cleanup ---
   protected fun finalize() {
-    timeoutRunnables.values.forEach { handler.removeCallbacks(it) }
-    intervalRunnables.values.forEach { handler.removeCallbacks(it) }
-    timeoutRunnables.clear()
-    intervalRunnables.clear()
-    if (wakeLock.isHeld) wakeLock.release()
+    synchronized(stateLock) {
+      timeoutRunnables.values.forEach { handler.removeCallbacks(it) }
+      intervalRunnables.values.forEach { handler.removeCallbacks(it) }
+      timeoutRunnables.clear()
+      intervalRunnables.clear()
+      if (wakeLock.isHeld) wakeLock.release()
+    }
   }
 }
