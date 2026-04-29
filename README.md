@@ -4,6 +4,8 @@ High-performance background-safe timers for React Native, powered by Nitro Modul
 
 `react-native-nitro-bg-timer` provides a simple timer API (`setTimeout`, `setInterval`) with native implementations on iOS and Android to reduce JS timer limitations while your app moves between foreground and background states.
 
+![Release screenshot](docs/Screenshot%202026-04-29%20at%2023.35.36.png)
+
 ## Why this package
 
 - Native-backed timers via Nitro Modules
