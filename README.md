@@ -33,17 +33,12 @@ yarn add react-native-nitro-bg-timer react-native-nitro-modules
 
 ### iOS
 
-Add background modes in `Info.plist`:
+This module uses `UIApplication.beginBackgroundTask` internally.  
+It does **not** require runtime permissions and does **not** require `BGTaskScheduler` by default.
 
-```xml
-<key>UIBackgroundModes</key>
-<array>
-  <string>background-processing</string>
-  <string>background-fetch</string>
-</array>
-```
+Background modes in `Info.plist` are optional and depend on your app use-case (audio, location, VOIP, fetch, etc). For pure timer usage with this package, keep your `Info.plist` minimal unless your app already needs specific background capabilities.
 
-Then install pods:
+Install pods:
 
 ```bash
 cd ios && pod install
@@ -51,12 +46,32 @@ cd ios && pod install
 
 ### Android
 
-Add required permissions in `android/app/src/main/AndroidManifest.xml`:
+This module acquires a `PARTIAL_WAKE_LOCK` while timers are active.
+
+Add the following in your app manifest:
 
 ```xml
 <uses-permission android:name="android.permission.WAKE_LOCK" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 ```
+
+`FOREGROUND_SERVICE` is **not required by this library itself** because it does not start a foreground service.  
+Only add `FOREGROUND_SERVICE` if **your app** uses a foreground service for other background workloads.
+
+## Platform permission/entitlement review
+
+### iOS
+
+- **Runtime permission prompt:** none
+- **Required key for this library:** none
+- **May be needed by your app:** `UIBackgroundModes` for app-specific background categories
+- **Important behavior:** iOS can still suspend/terminate apps in background; timers are best-effort within iOS policy
+
+### Android
+
+- **Runtime permission prompt:** none
+- **Required manifest permission for this library:** `android.permission.WAKE_LOCK`
+- **Not required by this library:** `android.permission.FOREGROUND_SERVICE`
+- **Important behavior:** OEM battery optimization/Doze can still impact timer reliability
 
 ## Usage
 
@@ -74,6 +89,70 @@ const intervalId = BackgroundTimer.setInterval(() => {
 // cleanup
 BackgroundTimer.clearTimeout(timeoutId)
 BackgroundTimer.clearInterval(intervalId)
+```
+
+## Example: React screen with safe cleanup
+
+```tsx
+import React, { useEffect, useRef, useState } from 'react'
+import { AppState, Button, Text, View } from 'react-native'
+import { BackgroundTimer } from 'react-native-nitro-bg-timer'
+
+export function TimerDemoScreen() {
+  const [ticks, setTicks] = useState(0)
+  const [appState, setAppState] = useState(AppState.currentState)
+  const intervalIdRef = useRef<number | null>(null)
+  const timeoutIdRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', setAppState)
+    return () => sub.remove()
+  }, [])
+
+  const startInterval = () => {
+    if (intervalIdRef.current != null) return
+    intervalIdRef.current = BackgroundTimer.setInterval(() => {
+      setTicks(prev => prev + 1)
+    }, 1000)
+  }
+
+  const stopInterval = () => {
+    if (intervalIdRef.current == null) return
+    BackgroundTimer.clearInterval(intervalIdRef.current)
+    intervalIdRef.current = null
+  }
+
+  const runTimeout = () => {
+    if (timeoutIdRef.current != null) {
+      BackgroundTimer.clearTimeout(timeoutIdRef.current)
+    }
+    timeoutIdRef.current = BackgroundTimer.setTimeout(() => {
+      console.log('timeout fired')
+      timeoutIdRef.current = null
+    }, 5000)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (intervalIdRef.current != null) {
+        BackgroundTimer.clearInterval(intervalIdRef.current)
+      }
+      if (timeoutIdRef.current != null) {
+        BackgroundTimer.clearTimeout(timeoutIdRef.current)
+      }
+    }
+  }, [])
+
+  return (
+    <View style={{ padding: 16, gap: 8 }}>
+      <Text>AppState: {appState}</Text>
+      <Text>Ticks: {ticks}</Text>
+      <Button title="Start interval (1s)" onPress={startInterval} />
+      <Button title="Stop interval" onPråess={stopInterval} />
+      <Button title="Run timeout (5s)" onPress={runTimeout} />
+    </View>
+  )
+}
 ```
 
 ## API
@@ -126,6 +205,7 @@ useEffect(() => {
 - iOS background execution time is limited by system policies.
 - Android behavior can still be affected by OEM battery restrictions.
 - For heavy or long-running workloads, consider combining with platform-native job schedulers.
+- This library is timer-focused; it is not a guaranteed persistent job scheduler across process death.
 
 ## Troubleshooting
 
@@ -137,8 +217,8 @@ useEffect(() => {
 
 ### Timers do not fire reliably in background
 
-- Verify iOS `UIBackgroundModes` setup
-- Verify Android permissions in `AndroidManifest.xml`
+- Verify Android `WAKE_LOCK` is present in your app manifest
+- On iOS, remember execution is still bounded by OS background limits
 - Test on real devices (some emulator/background behaviors differ)
 
 ### iOS build/pod issues
@@ -169,11 +249,50 @@ Useful scripts:
 - `nitrogen/`: generated Nitro bindings
 - `lib/`: compiled output
 
-## Roadmap (short-term)
+## Implementation plan (to-do)
 
-- Better scheduling controls (policies/options)
-- Improved diagnostics and debug hooks
-- Stronger background reliability strategy across app lifecycle transitions
+Status legend:
+
+- `[x]` done
+- `[ ]` planned
+- `[~]` in progress
+
+### Core implementation
+
+- [x] Nitro module bridge for iOS and Android
+- [x] API surface: `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`
+- [x] JS wrapper with callback maps and timer id management
+- [x] iOS background task integration via `beginBackgroundTask`
+- [x] Android wake lock integration via `PARTIAL_WAKE_LOCK`
+- [x] Basic cleanup handling on timer clear and object cleanup
+
+### Documentation and developer experience
+
+- [x] Installation and platform setup guide
+- [x] Platform permission/entitlement review section
+- [x] Practical React usage example with cleanup
+- [~] Add production test checklist for QA (real-device background scenarios)
+- [ ] Add compatibility matrix (RN version x Nitro version x platform notes)
+- [ ] Add release notes section per version
+
+### Reliability improvements (planned)
+
+- [ ] Add timer drift tracking and correction strategy
+- [ ] Add optional diagnostics API (active timers, last run, runtime stats)
+- [ ] Add richer error propagation strategy from native callbacks
+- [ ] Add stress-test example app scenario and benchmark script
+
+### Scheduling features (planned)
+
+- [ ] Grouped timers (tag/group based cancel)
+- [ ] Optional scheduling policies (jitter, max runs, retry/backoff)
+- [ ] Persistent timer restore strategy across app relaunch
+
+### Platform hardening (planned)
+
+- [ ] Android battery optimization guide and helper recommendations
+- [ ] iOS lifecycle behavior matrix (foreground, background, suspended)
+- [ ] Optional integration path with job schedulers for long-running tasks
 
 ## License
 
