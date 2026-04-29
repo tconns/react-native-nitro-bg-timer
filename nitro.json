@@ -10,8 +10,14 @@
   },
   "autolinking": {
     "NitroBackgroundTimer": {
-      "swift": "NitroBackgroundTimer",
-      "kotlin": "NitroBackgroundTimer"
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "NitroBackgroundTimer"
+      },
+      "android": {
+        "language": "kotlin",
+        "implementationClassName": "NitroBackgroundTimer"
+      }
     }
   },
   "ignorePaths": ["**/node_modules"],

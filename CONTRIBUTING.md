@@ -21,6 +21,8 @@ yarn
 
 This project uses Nitro Modules. If you're not familiar with how Nitro works, make sure to check the [Nitro Modules Docs](https://nitro.margelo.com/).
 
+This library targets Nitro `0.35.x` or newer (`react-native-nitro-modules` + `nitrogen`).
+
 You need to run [Nitrogen](https://nitro.margelo.com/docs/nitrogen) to generate the boilerplate code required for this project. The example app will not build without this step.
 
 Run **Nitrogen** in following cases:

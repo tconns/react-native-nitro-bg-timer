@@ -19,7 +19,7 @@ This module provides high-performance background timer functionality for React N
 
 - React Native >= 0.76
 - Node >= 18
-- `react-native-nitro-modules` must be installed (Nitro runtime)
+- `react-native-nitro-modules` >= 0.35.x must be installed (Nitro runtime)
 
 ## Installation
 
@@ -495,7 +495,7 @@ See `CONTRIBUTING.md` for contribution workflow.
 When updating spec files in `src/specs/*.nitro.ts`, regenerate Nitro artifacts:
 
 ```bash
-npx nitro-codegen
+npx nitrogen
 ```
 
 ## Project Structure
