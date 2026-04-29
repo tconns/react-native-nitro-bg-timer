@@ -14,16 +14,23 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   private var bgTask: UIBackgroundTaskIdentifier = .invalid
   private var timeoutTimers: [Int: Timer] = [:]
   private var intervalTimers: [Int: Timer] = [:]
-  private let serialQueue = DispatchQueue(label: "com.nitro.backgroundtimer.queue", qos: .userInitiated)
+
+  private func runOnMain(_ work: @escaping () -> Void) {
+    if Thread.isMainThread {
+      work()
+    } else {
+      DispatchQueue.main.async(execute: work)
+    }
+  }
 
   // MARK: - Background task helpers
   private func acquireBackgroundTask() {
     guard bgTask == .invalid else { return }
-    
+
     bgTask = UIApplication.shared.beginBackgroundTask(withName: "NitroBackgroundTimer") { [weak self] in
       self?.releaseBackgroundTask()
     }
-    
+
     if bgTask == .invalid {
       print("[NitroBackgroundTimer] Warning: Failed to acquire background task")
     }
@@ -37,7 +44,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
 
   private func releaseBackgroundTask() {
     guard bgTask != .invalid else { return }
-    
+
     UIApplication.shared.endBackgroundTask(bgTask)
     bgTask = .invalid
   }
@@ -45,49 +52,36 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   // MARK: - Timeout
   func setTimeout(id: Double, duration: Double, callback: @escaping (Double) -> Void) -> Double {
     let intId = Int(id)
-    
-    serialQueue.async { [weak self] in
-      guard let self = self else { return }
-      
-      DispatchQueue.main.async {
-        // Clear existing timer with same ID
-        self.clearTimeout(id: id)
-        self.acquireBackgroundTask()
 
-        let timer = Timer.scheduledTimer(withTimeInterval: duration / 1000.0, repeats: false) { [weak self] _ in
-          guard let self = self else { return }
-          
-          // Execute callback
-          callback(id)
-          
-          // Cleanup
-          self.serialQueue.async {
-            DispatchQueue.main.async {
-              self.timeoutTimers.removeValue(forKey: intId)
-              self.releaseBackgroundTaskIfNeeded()
-            }
-          }
-        }
-        
-        self.timeoutTimers[intId] = timer
+    runOnMain { [weak self] in
+      guard let self else { return }
+      self.clearTimeout(id: id)
+      self.acquireBackgroundTask()
+
+      let timer = Timer.scheduledTimer(withTimeInterval: duration / 1000.0, repeats: false) { [weak self] _ in
+        guard let self else { return }
+        callback(id)
+        self.timeoutTimers.removeValue(forKey: intId)
+        self.releaseBackgroundTaskIfNeeded()
       }
+
+      self.timeoutTimers[intId] = timer
     }
-    
+
     return id
   }
 
   func clearTimeout(id: Double) {
     let intId = Int(id)
-    
-    serialQueue.async { [weak self] in
-      guard let self = self else { return }
-      
-      DispatchQueue.main.async {
-        if let timer = self.timeoutTimers[intId] {
-          timer.invalidate()
-          self.timeoutTimers.removeValue(forKey: intId)
-          self.releaseBackgroundTaskIfNeeded()
-        }
+
+    runOnMain { [weak self] in
+      guard let self else { return }
+      if let timer = self.timeoutTimers[intId] {
+        timer.invalidate()
+        self.timeoutTimers.removeValue(forKey: intId)
+        self.releaseBackgroundTaskIfNeeded()
+      } else {
+        self.releaseBackgroundTaskIfNeeded()
       }
     }
   }
@@ -95,59 +89,57 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   // MARK: - Interval
   func setInterval(id: Double, interval: Double, callback: @escaping (Double) -> Void) -> Double {
     let intId = Int(id)
-    
-    serialQueue.async { [weak self] in
-      guard let self = self else { return }
-      
-      DispatchQueue.main.async {
-        // Clear existing timer with same ID
-        self.clearInterval(id: id)
-        self.acquireBackgroundTask()
 
-        let timer = Timer.scheduledTimer(withTimeInterval: interval / 1000.0, repeats: true) { [weak self] _ in
-          guard let self = self else { return }
-          
-          // Execute callback
-          callback(id)
-        }
-        
-        self.intervalTimers[intId] = timer
+    runOnMain { [weak self] in
+      guard let self else { return }
+      self.clearInterval(id: id)
+      self.acquireBackgroundTask()
+
+      let timer = Timer.scheduledTimer(withTimeInterval: interval / 1000.0, repeats: true) { [weak self] _ in
+        guard let self else { return }
+        // Interval might have been cleared/replaced while callback is running.
+        guard self.intervalTimers[intId] != nil else { return }
+        callback(id)
       }
+
+      self.intervalTimers[intId] = timer
     }
-    
+
     return id
   }
 
   func clearInterval(id: Double) {
     let intId = Int(id)
-    
-    serialQueue.async { [weak self] in
-      guard let self = self else { return }
-      
-      DispatchQueue.main.async {
-        if let timer = self.intervalTimers[intId] {
-          timer.invalidate()
-          self.intervalTimers.removeValue(forKey: intId)
-          self.releaseBackgroundTaskIfNeeded()
-        }
+
+    runOnMain { [weak self] in
+      guard let self else { return }
+      if let timer = self.intervalTimers[intId] {
+        timer.invalidate()
+        self.intervalTimers.removeValue(forKey: intId)
+        self.releaseBackgroundTaskIfNeeded()
+      } else {
+        self.releaseBackgroundTaskIfNeeded()
       }
     }
   }
 
   deinit {
-    serialQueue.sync {
-      DispatchQueue.main.sync {
-        // Invalidate all timers
-        timeoutTimers.values.forEach { $0.invalidate() }
-        intervalTimers.values.forEach { $0.invalidate() }
-        
-        // Clear collections
-        timeoutTimers.removeAll()
-        intervalTimers.removeAll()
-        
-        // Release background task
-        releaseBackgroundTask()
+    let timeoutValues = Array(timeoutTimers.values)
+    let intervalValues = Array(intervalTimers.values)
+    let releasingTask = bgTask
+
+    let cleanup = {
+      timeoutValues.forEach { $0.invalidate() }
+      intervalValues.forEach { $0.invalidate() }
+      if releasingTask != .invalid {
+        UIApplication.shared.endBackgroundTask(releasingTask)
       }
+    }
+
+    if Thread.isMainThread {
+      cleanup()
+    } else {
+      DispatchQueue.main.async(execute: cleanup)
     }
   }
 }
