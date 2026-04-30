@@ -34,8 +34,13 @@
     "lint": "eslint \"**/*.{js,ts,tsx}\" --fix",
     "lint-ci": "eslint \"**/*.{js,ts,tsx}\" -f @jamesacarr/github-actions",
     "typescript": "tsc",
-    "specs": "typescript && nitrogen --logLevel=\"debug\"",
-    "nitrogen": "nitrogen"
+    "specs": "npm run typescript && nitrogen --logLevel=\"debug\"",
+    "nitrogen": "nitrogen",
+    "npm:login:web": "npm login --registry https://registry.npmjs.org/ --auth-type=web",
+    "npm:whoami": "npm whoami --registry https://registry.npmjs.org/",
+    "prepublishOnly": "npm run typecheck && npm run typescript",
+    "release:npm": "npm run npm:login:web && npm publish --access public",
+    "release:npm:provenance": "npm publish --access public --provenance"
   },
   "keywords": [
     "react-native",
@@ -65,7 +70,8 @@
   },
   "homepage": "https://github.com/tconns/react-native-nitro-bg-timer#readme",
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "devDependencies": {
     "@react-native/eslint-config": "0.80.2",
