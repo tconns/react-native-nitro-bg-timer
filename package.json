@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-bg-timer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "react-native-nitro-bg-timer is a react native package built with Nitro",
   "main": "lib/index",
   "module": "lib/index",
@@ -17,30 +17,34 @@
     "android/fix-prefab.gradle",
     "android/CMakeLists.txt",
     "android/src",
+    "cpp",
     "ios/**/*.h",
     "ios/**/*.m",
     "ios/**/*.mm",
     "ios/**/*.cpp",
     "ios/**/*.swift",
-    "app.plugin.js",
     "nitro.json",
     "*.podspec",
     "README.md"
   ],
   "scripts": {
-    "postinstall": "tsc || exit 0;",
+    "postinstall": "npm run typescript || exit 0;",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf android/build node_modules/**/android/build lib",
     "lint": "eslint \"**/*.{js,ts,tsx}\" --fix",
     "lint-ci": "eslint \"**/*.{js,ts,tsx}\" -f @jamesacarr/github-actions",
     "typescript": "tsc",
+    "test": "tsx --test src/__tests__/index.test.ts",
     "specs": "npm run typescript && nitrogen --logLevel=\"debug\"",
     "nitrogen": "nitrogen",
     "npm:login:web": "npm login --registry https://registry.npmjs.org/ --auth-type=web",
     "npm:whoami": "npm whoami --registry https://registry.npmjs.org/",
-    "prepublishOnly": "npm run typecheck && npm run typescript",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run typescript",
     "release:npm": "npm run npm:login:web && npm publish --access public",
-    "release:npm:provenance": "npm publish --access public --provenance"
+    "release:npm:provenance": "npm publish --access public --provenance",
+    "benchmark:node": "node benchmarks/node-scheduler-benchmark.mjs",
+    "benchmark:bridge": "node benchmarks/bridge-overhead-benchmark.mjs",
+    "verify:release": "npm run typecheck && npm run lint && npm run test && npm run typescript && npm run benchmark:node && npm run benchmark:bridge"
   },
   "keywords": [
     "react-native",
@@ -74,16 +78,20 @@
     "access": "public"
   },
   "devDependencies": {
+    "@react-native/babel-preset": "0.80.2",
     "@react-native/eslint-config": "0.80.2",
-    "@types/jest": "^29.5.12",
     "@types/react": "19.1.0",
     "conventional-changelog-conventionalcommits": "^9.1.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.2.6",
     "nitrogen": "^0.35.6",
+    "prettier": "^3.5.3",
     "react": "19.1.0",
     "react-native": "0.80.2",
     "react-native-builder-bob": "^0.37.0",
     "react-native-nitro-modules": "^0.35.6",
     "semantic-release": "^24.2.6",
+    "tsx": "^4.19.2",
     "typescript": "5.0.4"
   },
   "peerDependencies": {
@@ -115,7 +123,9 @@
   },
   "eslintIgnore": [
     "node_modules/",
-    "lib/"
+    "lib/",
+    "nitrogen/",
+    "benchmarks/"
   ],
   "prettier": {
     "quoteProps": "consistent",

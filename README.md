@@ -150,7 +150,7 @@ export function TimerDemoScreen() {
       <Text>AppState: {appState}</Text>
       <Text>Ticks: {ticks}</Text>
       <Button title="Start interval (1s)" onPress={startInterval} />
-      <Button title="Stop interval" onPråess={stopInterval} />
+      <Button title="Stop interval" onPress={stopInterval} />
       <Button title="Run timeout (5s)" onPress={runTimeout} />
     </View>
   )
@@ -158,6 +158,48 @@ export function TimerDemoScreen() {
 ```
 
 ## API
+
+### V2 scheduler API
+
+The v1 API remains supported, but v2 introduces scheduler-first features:
+
+```ts
+import { BackgroundScheduler, BackgroundTimer } from 'react-native-nitro-bg-timer'
+
+const handle = BackgroundTimer.schedule(() => {
+  console.log('job fired')
+}, {
+  kind: 'interval',
+  intervalMs: 1000,
+  group: 'sync',
+  priority: 'interactive',
+  driftPolicy: 'coalesce',
+})
+
+BackgroundTimer.pauseGroup('sync')
+BackgroundTimer.resumeGroup('sync')
+BackgroundTimer.cancelGroup('sync')
+
+const cronHandle = BackgroundScheduler.scheduleCron(() => {
+  console.log('every 2 minutes')
+}, '*/2 * * * *')
+
+handle.cancel()
+cronHandle.cancel()
+```
+
+Supported v2 additions:
+
+- `BackgroundTimer.schedule(callback, options)`
+- `BackgroundTimer.pauseGroup(group)`
+- `BackgroundTimer.resumeGroup(group)`
+- `BackgroundTimer.cancelGroup(group)`
+- `BackgroundTimer.listActiveTimerIds()`
+- `BackgroundTimer.getStats()`
+- `BackgroundTimer.onStats(listener)`
+- `BackgroundScheduler.scheduleAt(callback, runAtMs, options?)`
+- `BackgroundScheduler.scheduleInterval(callback, intervalMs, options?)`
+- `BackgroundScheduler.scheduleCron(callback, expression, options?)`
 
 ### `BackgroundTimer.setTimeout(callback, durationMs): number`
 
@@ -240,7 +282,30 @@ Useful scripts:
 
 - `npm run typecheck`
 - `npm run lint`
+- `npm run test`
 - `npm run specs`
+- `npm run benchmark:node`
+- `npm run benchmark:bridge`
+- `npm run verify:release`
+
+## QA checklist (production)
+
+- Validate v1 compatibility (`setTimeout`, `setInterval`) in a host app.
+- Validate v2 grouped controls (`pauseGroup`, `resumeGroup`, `cancelGroup`).
+- Run real-device background scenario for at least 20 minutes on Android and iOS.
+- Validate jitter under load (>=1k active intervals) and inspect `BackgroundTimer.getStats()`.
+- Test foreground/background transitions repeatedly to catch lifecycle race conditions.
+
+## Compatibility matrix
+
+| React Native | Nitro Modules | Status |
+| --- | --- | --- |
+| `0.80.x` | `0.35.x` | first-class support |
+| `0.76 - 0.79` | `0.35.x` | expected to work, validate in host app CI |
+
+## Release notes
+
+- `0.4.0` (planned): scheduler-first v2 API, grouped controls, drift policies, and runtime stats.
 
 ## Project structure
 
@@ -248,8 +313,13 @@ Useful scripts:
 - `src/specs/`: Nitro interface definitions
 - `android/`: Android native implementation
 - `ios/`: iOS native implementation
+- `cpp/`: shared native scheduler core (C++)
 - `nitrogen/`: generated Nitro bindings
 - `lib/`: compiled output
+- `docs/ARCHITECTURE.md`: v2 runtime architecture notes
+- `docs/PLATFORM_LIFECYCLE_MATRIX.md`: platform behavior matrix
+- `docs/MIGRATION_V2.md`: migration cookbook for v2
+- `docs/FEATURE_UPGRADE_STATUS.md`: comprehensive feature/status tracker
 
 ## Implementation plan (to-do)
 
