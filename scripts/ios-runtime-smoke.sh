@@ -19,7 +19,8 @@ int main() {
                 intervalMs:1
                      group:@"runtime"
                driftPolicy:@"coalesce"
-                   maxRuns:1];
+                   maxRuns:1
+              metadataJson:@"{}"];
     NSArray<NSNumber *> *pairs = [bridge popDuePairsAtNowMs:nowMs + 50];
     if (pairs.count < 2 || ![pairs.firstObject isEqualToNumber:@901]) {
       fprintf(stderr, "ios-runtime-smoke: unexpected due pairs\\n");

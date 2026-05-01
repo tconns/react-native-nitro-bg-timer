@@ -19,6 +19,7 @@ Pod::Spec.new do |s|
     # Implementation (C++ objects)
     "cpp/**/*.{hpp,cpp}",
   ]
+  s.exclude_files = ["ios/Tests/**/*"]
 
   load 'nitrogen/generated/ios/NitroBackgroundTimer+autolinking.rb'
   add_nitrogen_files(s)

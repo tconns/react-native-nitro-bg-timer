@@ -27,7 +27,8 @@
             intervalMs:(int64_t)intervalMs
                  group:(NSString *)group
            driftPolicy:(NSString *)driftPolicy
-               maxRuns:(NSInteger)maxRuns {
+               maxRuns:(NSInteger)maxRuns
+          metadataJson:(NSString *)metadataJson {
   nitro_bt_scheduler::TaskRecord t{};
   t.id = static_cast<int32_t>(timerId);
   t.dueAtMs = dueAtMs;
@@ -42,6 +43,7 @@
   }
   t.runCount = 0;
   t.paused = false;
+  t.metadataJson = [metadataJson UTF8String] ?: "";
   _core->schedule(t);
 }
 
@@ -136,7 +138,8 @@
            driftPolicy:(NSString *)driftPolicy
                maxRuns:(NSInteger)maxRuns
               runCount:(NSInteger)runCount
-                paused:(BOOL)paused {
+                paused:(BOOL)paused
+          metadataJson:(NSString *)metadataJson {
   nitro_bt_scheduler::TaskRecord t{};
   t.id = static_cast<int32_t>(timerId);
   t.dueAtMs = dueAtMs;
@@ -151,6 +154,7 @@
   }
   t.runCount = static_cast<int32_t>(runCount);
   t.paused = paused ? true : false;
+  t.metadataJson = [metadataJson UTF8String] ?: "";
   _core->importTaskRecord(t);
 }
 

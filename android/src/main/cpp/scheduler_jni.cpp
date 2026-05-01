@@ -50,7 +50,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_backgroundtimer_Schedul
     jlong intervalMs,
     jstring group,
     jstring driftPolicy,
-    jint maxRuns) {
+    jint maxRuns,
+    jstring metadataJson) {
   auto* core = reinterpret_cast<SchedulerCore*>(handle);
   TaskRecord t{};
   t.id = id;
@@ -66,6 +67,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_backgroundtimer_Schedul
   }
   t.runCount = 0;
   t.paused = false;
+  t.metadataJson = jstringToUtf(env, metadataJson);
   core->schedule(t);
 }
 
@@ -216,7 +218,8 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_backgroundtimer_Schedul
     jstring driftPolicy,
     jint maxRuns,
     jint runCount,
-    jboolean paused) {
+    jboolean paused,
+    jstring metadataJson) {
   auto* core = reinterpret_cast<SchedulerCore*>(handle);
   TaskRecord t{};
   t.id = id;
@@ -232,5 +235,6 @@ extern "C" JNIEXPORT void JNICALL Java_com_margelo_nitro_backgroundtimer_Schedul
   }
   t.runCount = runCount;
   t.paused = paused == JNI_TRUE;
+  t.metadataJson = jstringToUtf(env, metadataJson);
   core->importTaskRecord(t);
 }

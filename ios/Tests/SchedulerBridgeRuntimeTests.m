@@ -16,7 +16,8 @@
               intervalMs:1
                    group:@"runtime"
              driftPolicy:@"coalesce"
-                 maxRuns:1];
+                 maxRuns:1
+            metadataJson:@"{}"];
 
   NSArray<NSNumber *> *pairs = [bridge popDuePairsAtNowMs:nowMs + 50];
   XCTAssertTrue(pairs.count >= 2);

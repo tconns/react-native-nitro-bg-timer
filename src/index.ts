@@ -17,6 +17,13 @@ const schedulerEvents = new EventEmitter<{ stats: [SchedulerStats] }>()
 export type TimerPriority = 'realtime' | 'interactive' | 'background'
 export type DriftPolicy = 'catchUp' | 'skipLate' | 'coalesce'
 export type ScheduleKind = 'timeout' | 'interval'
+export type PolicyProfile = 'batterySaver' | 'balanced' | 'latencyFirst'
+const MAX_CANCELLATION_TOKEN_LEN = 256
+const VALID_POLICY_PROFILES: readonly PolicyProfile[] = [
+  'batterySaver',
+  'balanced',
+  'latencyFirst',
+]
 
 export interface ScheduleOptions {
   kind: ScheduleKind
@@ -38,6 +45,8 @@ export interface ScheduleOptions {
   correlationToken?: number
   retryMaxAttempts?: number
   retryInitialBackoffMs?: number
+  cancellationToken?: string
+  policyProfile?: PolicyProfile
 }
 
 export interface SchedulerStats {
@@ -76,6 +85,16 @@ function normalizeOptions(options: ScheduleOptions): ScheduleOptions {
       ? tagMaskFromStrings(options.tags)
       : undefined)
 
+  const normalizedCancellationToken = options.cancellationToken?.slice(
+    0,
+    MAX_CANCELLATION_TOKEN_LEN
+  )
+  const normalizedPolicyProfile = VALID_POLICY_PROFILES.includes(
+    (options.policyProfile ?? 'balanced') as PolicyProfile
+  )
+    ? (options.policyProfile ?? 'balanced')
+    : 'balanced'
+
   return {
     kind: options.kind,
     intervalMs: options.intervalMs,
@@ -95,6 +114,10 @@ function normalizeOptions(options: ScheduleOptions): ScheduleOptions {
     ...(options.retryInitialBackoffMs !== undefined
       ? { retryInitialBackoffMs: options.retryInitialBackoffMs }
       : {}),
+    ...(normalizedCancellationToken !== undefined
+      ? { cancellationToken: normalizedCancellationToken }
+      : {}),
+    policyProfile: normalizedPolicyProfile,
   }
 }
 
@@ -156,6 +179,12 @@ export const BackgroundTimer = {
       normalized.group ?? DEFAULT_GROUP,
       normalized.driftPolicy ?? 'coalesce',
       normalized.maxRuns ?? 0,
+      normalized.correlationToken ?? 0,
+      normalized.retryMaxAttempts ?? 0,
+      normalized.retryInitialBackoffMs ?? 0,
+      normalized.cancellationToken ?? '',
+      normalized.tagMaskHint ?? 0,
+      normalized.policyProfile ?? 'balanced',
       () => {
         runAndCleanup(id)
         emitStatsThrottled()
@@ -182,6 +211,12 @@ export const BackgroundTimer = {
       DEFAULT_GROUP,
       'coalesce',
       1,
+      0,
+      0,
+      0,
+      '',
+      0,
+      'balanced',
       () => runAndCleanup(id)
     )
     return id
@@ -204,6 +239,12 @@ export const BackgroundTimer = {
       DEFAULT_GROUP,
       'coalesce',
       0,
+      0,
+      0,
+      0,
+      '',
+      0,
+      'balanced',
       () => runAndCleanup(id)
     )
     return id

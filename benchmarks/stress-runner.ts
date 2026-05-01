@@ -28,6 +28,12 @@ function runStressOnce(): { ms: number; n: number } {
       _group,
       _driftPolicy,
       _maxRuns,
+      _correlationToken,
+      _retryMaxAttempts,
+      _retryInitialBackoffMs,
+      _cancellationToken,
+      _tagMask,
+      _policyProfile,
       _cb
     ) => {
       timers.set(id, Date.now())
@@ -52,10 +58,40 @@ function runStressOnce(): { ms: number; n: number } {
         groups: {},
       }),
     setTimeout: (id, _duration, _cb) =>
-      mock.schedule(id, 0, 'timeout', 1, 'default', 'coalesce', 1, noopCallback),
+      mock.schedule(
+        id,
+        0,
+        'timeout',
+        1,
+        'default',
+        'coalesce',
+        1,
+        0,
+        0,
+        0,
+        '',
+        0,
+        'balanced',
+        noopCallback
+      ),
     clearTimeout: (id) => mock.cancel(id),
     setInterval: (id, _interval, _cb) =>
-      mock.schedule(id, 0, 'interval', 1, 'default', 'coalesce', 0, noopCallback),
+      mock.schedule(
+        id,
+        0,
+        'interval',
+        1,
+        'default',
+        'coalesce',
+        0,
+        0,
+        0,
+        0,
+        '',
+        0,
+        'balanced',
+        noopCallback
+      ),
     clearInterval: (id) => mock.cancel(id),
     getPersistWireJson: () => '{"version":1,"tasks":[]}',
     restorePersistWireJson: () => {},
@@ -65,6 +101,8 @@ function runStressOnce(): { ms: number; n: number } {
 
   const t0 = performance.now()
   for (let i = 1; i <= N; i++) {
+    const profile =
+      i % 3 === 0 ? 'batterySaver' : i % 3 === 1 ? 'balanced' : 'latencyFirst'
     NitroBackgroundTimer.schedule(
       i,
       i % 1000,
@@ -73,6 +111,12 @@ function runStressOnce(): { ms: number; n: number } {
       `g${i % 8}`,
       'coalesce',
       0,
+      i * 10,
+      (i % 5) + 1,
+      200 + (i % 4) * 100,
+      `cancel-${i % 17}`,
+      i % 1024,
+      profile,
       noopCallback
     )
   }
@@ -83,7 +127,7 @@ function runStressOnce(): { ms: number; n: number } {
   }
 
   NitroBackgroundTimer.restorePersistWireJson(
-    `{"version":1,"tasks":[{"id":777,"dueAtMs":1,"kind":"timeout","intervalMs":1,"group":"default","driftPolicy":"coalesce","maxRuns":1,"runCount":0,"paused":false}]}`
+    `{"version":1,"tasks":[{"id":777,"dueAtMs":1,"kind":"timeout","intervalMs":1,"group":"default","driftPolicy":"coalesce","maxRuns":1,"runCount":0,"paused":false,"metadataJson":"{\\"correlationToken\\":9001,\\"retryMaxAttempts\\":2,\\"retryInitialBackoffMs\\":400,\\"cancellationToken\\":\\"restore\\",\\"tagMask\\":7,\\"policyProfile\\":\\"balanced\\"}"}]}`
   )
 
   const ms = performance.now() - t0

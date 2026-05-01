@@ -226,7 +226,8 @@ std::string SchedulerCore::exportPersistWireJson() const {
     }
     o << ',';
     o << "\"runCount\":" << t.runCount << ',';
-    o << "\"paused\":" << (t.paused ? "true" : "false");
+    o << "\"paused\":" << (t.paused ? "true" : "false") << ',';
+    o << "\"metadataJson\":" << jsonEscapeToken(t.metadataJson);
     o << '}';
   }
   o << "]}";

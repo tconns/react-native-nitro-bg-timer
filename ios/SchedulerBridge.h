@@ -10,7 +10,8 @@ NS_ASSUME_NONNULL_BEGIN
             intervalMs:(int64_t)intervalMs
                  group:(NSString *)group
            driftPolicy:(NSString *)driftPolicy
-               maxRuns:(NSInteger)maxRuns NS_SWIFT_NAME(schedule(timerId:dueAtMs:kind:intervalMs:group:driftPolicy:maxRuns:));
+               maxRuns:(NSInteger)maxRuns
+          metadataJson:(NSString *)metadataJson NS_SWIFT_NAME(schedule(timerId:dueAtMs:kind:intervalMs:group:driftPolicy:maxRuns:metadataJson:));
 
 - (void)cancelId:(NSInteger)timerId NS_SWIFT_NAME(cancel(timerId:));
 
@@ -46,7 +47,8 @@ NS_ASSUME_NONNULL_BEGIN
            driftPolicy:(NSString *)driftPolicy
                maxRuns:(NSInteger)maxRuns
               runCount:(NSInteger)runCount
-                paused:(BOOL)paused NS_SWIFT_NAME(importTask(timerId:dueAtMs:kind:intervalMs:group:driftPolicy:maxRuns:runCount:paused:));
+                paused:(BOOL)paused
+          metadataJson:(NSString *)metadataJson NS_SWIFT_NAME(importTask(timerId:dueAtMs:kind:intervalMs:group:driftPolicy:maxRuns:runCount:paused:metadataJson:));
 
 @end
 

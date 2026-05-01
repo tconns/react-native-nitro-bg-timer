@@ -25,6 +25,12 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     let group: String
     let driftPolicy: String
     let maxRuns: Int?
+    let correlationToken: Int64
+    let retryMaxAttempts: Int
+    let retryInitialBackoffMs: Int64
+    let cancellationToken: String
+    let tagMask: Int64
+    let policyProfile: String
     var runCount: Int
     var paused: Bool
     let callback: (Double) -> Void
@@ -221,6 +227,43 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     wakeupCount = stats["wakeupCount"]?.intValue ?? wakeupCount
   }
 
+  private func encodeMetadataJson(
+    correlationToken: Int64,
+    retryMaxAttempts: Int,
+    retryInitialBackoffMs: Int64,
+    cancellationToken: String,
+    tagMask: Int64,
+    policyProfile: String
+  ) -> String {
+    let payload: [String: Any] = [
+      "correlationToken": correlationToken,
+      "retryMaxAttempts": retryMaxAttempts,
+      "retryInitialBackoffMs": retryInitialBackoffMs,
+      "cancellationToken": cancellationToken,
+      "tagMask": tagMask,
+      "policyProfile": policyProfile,
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+      return "{}"
+    }
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+
+  private func applyPolicyProfile(
+    profile: String,
+    retryMax: Int,
+    retryBackoffMs: Int64
+  ) -> (Int, Int64) {
+    switch profile {
+    case "batterySaver":
+      return (min(retryMax, 2), max(retryBackoffMs, 5_000))
+    case "latencyFirst":
+      return (max(retryMax, 1), min(retryBackoffMs, 250))
+    default:
+      return (retryMax, retryBackoffMs)
+    }
+  }
+
   func schedule(
     id: Double,
     delayMs: Double,
@@ -229,6 +272,12 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     group: String,
     driftPolicy: String,
     maxRuns: Double,
+    correlationToken: Double,
+    retryMaxAttempts: Double,
+    retryInitialBackoffMs: Double,
+    cancellationToken: String,
+    tagMask: Double,
+    policyProfile: String,
     callback: @escaping (Double) -> Void
   ) throws -> Double {
     let intId = Int(id)
@@ -237,6 +286,17 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     let normalizedIntervalMs = max(1, intervalMs)
     let normalizedGroup = group.isEmpty ? Self.defaultGroup : group
     let normalizedMaxRuns: Int? = maxRuns <= 0 ? nil : Int(maxRuns)
+    let normalizedCorrelationToken = Int64(correlationToken.rounded(.towardZero))
+    let normalizedRetryMaxAttemptsRaw = max(0, Int(retryMaxAttempts.rounded(.towardZero)))
+    let normalizedRetryInitialBackoffMsRaw = Int64(max(0, retryInitialBackoffMs).rounded(.towardZero))
+    let normalizedCancellationToken = cancellationToken
+    let normalizedTagMask = Int64(tagMask.rounded(.towardZero))
+    let normalizedPolicyProfile = policyProfile.isEmpty ? "balanced" : policyProfile
+    let (normalizedRetryMaxAttempts, normalizedRetryInitialBackoffMs) = applyPolicyProfile(
+      profile: normalizedPolicyProfile,
+      retryMax: normalizedRetryMaxAttemptsRaw,
+      retryBackoffMs: normalizedRetryInitialBackoffMsRaw
+    )
 
     runOnMain { [weak self] in
       guard let self else { return }
@@ -258,6 +318,14 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
             ? 1
             : normalizedMaxRuns == nil ? Int(-1) : normalizedMaxRuns!
         self.cppCallbacks[intId] = callback
+        let metadataJson = self.encodeMetadataJson(
+          correlationToken: normalizedCorrelationToken,
+          retryMaxAttempts: normalizedRetryMaxAttempts,
+          retryInitialBackoffMs: normalizedRetryInitialBackoffMs,
+          cancellationToken: normalizedCancellationToken,
+          tagMask: normalizedTagMask,
+          policyProfile: normalizedPolicyProfile
+        )
 
         bridge.schedule(
           timerId: intId,
@@ -266,7 +334,8 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
           intervalMs: Int64(normalizedIntervalMs.rounded(.towardZero)),
           group: normalizedGroup,
           driftPolicy: driftPolicy,
-          maxRuns: cppMaxRuns
+          maxRuns: cppMaxRuns,
+          metadataJson: metadataJson
         )
 
         self.syncCountersFromCpp(bridge)
@@ -282,6 +351,12 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
         group: normalizedGroup,
         driftPolicy: driftPolicy,
         maxRuns: normalizedMaxRuns,
+        correlationToken: normalizedCorrelationToken,
+        retryMaxAttempts: normalizedRetryMaxAttempts,
+        retryInitialBackoffMs: normalizedRetryInitialBackoffMs,
+        cancellationToken: normalizedCancellationToken,
+        tagMask: normalizedTagMask,
+        policyProfile: normalizedPolicyProfile,
         runCount: 0,
         paused: false,
         callback: callback
@@ -439,6 +514,14 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
             "maxRuns": task.maxRuns ?? -1,
             "runCount": task.runCount,
             "paused": task.paused,
+            "metadataJson": encodeMetadataJson(
+              correlationToken: task.correlationToken,
+              retryMaxAttempts: task.retryMaxAttempts,
+              retryInitialBackoffMs: task.retryInitialBackoffMs,
+              cancellationToken: task.cancellationToken,
+              tagMask: task.tagMask,
+              policyProfile: task.policyProfile
+            ),
           ]
         }
       let payload: [String: Any] = ["version": 1, "tasks": tasksPayload]
@@ -477,6 +560,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
           let paused =
             (t["paused"] as? Bool)
               ?? ((t["paused"] as? NSNumber)?.boolValue ?? false)
+          let metadataJson = (t["metadataJson"] as? String) ?? ""
 
           bridge.importTask(
             timerId: idNum,
@@ -487,7 +571,8 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
             driftPolicy: drift,
             maxRuns: maxRuns,
             runCount: runCnt,
-            paused: paused
+            paused: paused,
+            metadataJson: metadataJson
           )
         }
         ensureSchedulerTickCpp()
@@ -507,6 +592,12 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
       group: Self.defaultGroup,
       driftPolicy: "coalesce",
       maxRuns: 1,
+      correlationToken: 0,
+      retryMaxAttempts: 0,
+      retryInitialBackoffMs: 0,
+      cancellationToken: "",
+      tagMask: 0,
+      policyProfile: "balanced",
       callback: callback
     )
   }
@@ -524,6 +615,12 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
       group: Self.defaultGroup,
       driftPolicy: "coalesce",
       maxRuns: 0,
+      correlationToken: 0,
+      retryMaxAttempts: 0,
+      retryInitialBackoffMs: 0,
+      cancellationToken: "",
+      tagMask: 0,
+      policyProfile: "balanced",
       callback: callback
     )
   }

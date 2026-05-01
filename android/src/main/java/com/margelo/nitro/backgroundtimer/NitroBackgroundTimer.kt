@@ -45,7 +45,13 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     val maxRuns: Int?,
     var runCount: Int = 0,
     var paused: Boolean = false,
-    val group: String = DEFAULT_GROUP
+    val group: String = DEFAULT_GROUP,
+    val correlationToken: Long = 0L,
+    val retryMaxAttempts: Int = 0,
+    val retryInitialBackoffMs: Long = 0L,
+    val cancellationToken: String = "",
+    val tagMask: Long = 0L,
+    val policyProfile: String = "balanced"
   )
 
   private val tasksById = HashMap<Int, ScheduledTask>()
@@ -286,6 +292,30 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     releaseWakeLockIfNeeded()
   }
 
+  private fun encodeMetadataJson(
+    correlationToken: Long,
+    retryMaxAttempts: Int,
+    retryInitialBackoffMs: Long,
+    cancellationToken: String,
+    tagMask: Long,
+    policyProfile: String
+  ): String =
+    JSONObject().apply {
+      put("correlationToken", correlationToken)
+      put("retryMaxAttempts", retryMaxAttempts)
+      put("retryInitialBackoffMs", retryInitialBackoffMs)
+      put("cancellationToken", cancellationToken)
+      put("tagMask", tagMask)
+      put("policyProfile", policyProfile)
+    }.toString()
+
+  private fun applyPolicyProfile(profile: String, retryMax: Int, retryBackoffMs: Long): Pair<Int, Long> =
+    when (profile) {
+      "batterySaver" -> Pair(retryMax.coerceAtMost(2), retryBackoffMs.coerceAtLeast(5000L))
+      "latencyFirst" -> Pair(retryMax.coerceAtLeast(1), retryBackoffMs.coerceAtMost(250L))
+      else -> Pair(retryMax, retryBackoffMs)
+    }
+
   override fun schedule(
     id: Double,
     delayMs: Double,
@@ -294,6 +324,12 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     group: String,
     driftPolicy: String,
     maxRuns: Double,
+    correlationToken: Double,
+    retryMaxAttempts: Double,
+    retryInitialBackoffMs: Double,
+    cancellationToken: String,
+    tagMask: Double,
+    policyProfile: String,
     callback: (Double) -> Unit
   ): Double {
     val intId = id.toInt()
@@ -302,12 +338,31 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     val normalizedGroup = group.ifBlank { DEFAULT_GROUP }
     val mrInt = if (maxRuns <= 0.0) SCHED_MAX_RUN_UNLIMITED else maxRuns.toInt()
     val normalizedIntervalMs = intervalMs.toLong().coerceAtLeast(1L)
+    val normalizedCorrelationToken = correlationToken.toLong()
+    val normalizedRetryMaxAttemptsRaw = retryMaxAttempts.toInt().coerceAtLeast(0)
+    val normalizedRetryInitialBackoffMsRaw = retryInitialBackoffMs.toLong().coerceAtLeast(0L)
+    val normalizedCancellationToken = cancellationToken
+    val normalizedTagMask = tagMask.toLong()
+    val normalizedPolicyProfile = if (policyProfile.isBlank()) "balanced" else policyProfile
+    val (normalizedRetryMaxAttempts, normalizedRetryInitialBackoffMs) = applyPolicyProfile(
+      normalizedPolicyProfile,
+      normalizedRetryMaxAttemptsRaw,
+      normalizedRetryInitialBackoffMsRaw
+    )
 
     if (useCpp) {
       synchronized(cppSync) {
         acquireWakeLockIfNeededLocked()
         cppCallbacks[intId] = callback
         val dueAt = System.currentTimeMillis() + delayMs.toLong().coerceAtLeast(0L)
+        val metadataJson = encodeMetadataJson(
+          normalizedCorrelationToken,
+          normalizedRetryMaxAttempts,
+          normalizedRetryInitialBackoffMs,
+          normalizedCancellationToken,
+          normalizedTagMask,
+          normalizedPolicyProfile
+        )
         SchedulerNative.nativeSchedule(
           cppHandle,
           intId,
@@ -316,7 +371,8 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
           normalizedIntervalMs,
           normalizedGroup,
           driftPolicy,
-          mrInt
+          mrInt,
+          metadataJson
         )
         scheduleNextTickCppLocked()
       }
@@ -333,7 +389,13 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
         intervalMs = normalizedIntervalMs,
         driftPolicy = driftPolicy,
         maxRuns = if (maxRuns <= 0.0) null else maxRuns.toInt(),
-        group = normalizedGroup
+          group = normalizedGroup,
+          correlationToken = normalizedCorrelationToken,
+          retryMaxAttempts = normalizedRetryMaxAttempts,
+          retryInitialBackoffMs = normalizedRetryInitialBackoffMs,
+          cancellationToken = normalizedCancellationToken,
+          tagMask = normalizedTagMask,
+          policyProfile = normalizedPolicyProfile
       )
       tasksById[intId] = task
       queue.add(task)
@@ -495,6 +557,17 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
               put("maxRuns", t.maxRuns ?: -1)
               put("runCount", t.runCount)
               put("paused", t.paused)
+              put(
+                "metadataJson",
+                encodeMetadataJson(
+                  t.correlationToken,
+                  t.retryMaxAttempts,
+                  t.retryInitialBackoffMs,
+                  t.cancellationToken,
+                  t.tagMask,
+                  t.policyProfile
+                )
+              )
             }
           )
         }
@@ -527,6 +600,7 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
             o.optInt("maxRuns", SCHED_MAX_RUN_UNLIMITED),
             o.optInt("runCount", 0),
             o.optBoolean("paused", false),
+            o.optString("metadataJson", ""),
           )
         }
         scheduleNextTickCppLocked()
@@ -605,6 +679,12 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
       group = DEFAULT_GROUP,
       driftPolicy = "coalesce",
       maxRuns = 1.0,
+      correlationToken = 0.0,
+      retryMaxAttempts = 0.0,
+      retryInitialBackoffMs = 0.0,
+      cancellationToken = "",
+      tagMask = 0.0,
+      policyProfile = "balanced",
       callback = callback
     )
   }
@@ -622,6 +702,12 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
       group = DEFAULT_GROUP,
       driftPolicy = "coalesce",
       maxRuns = 0.0,
+      correlationToken = 0.0,
+      retryMaxAttempts = 0.0,
+      retryInitialBackoffMs = 0.0,
+      cancellationToken = "",
+      tagMask = 0.0,
+      policyProfile = "balanced",
       callback = callback
     )
   }

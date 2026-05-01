@@ -1,6 +1,6 @@
 # Native / bridge benchmark thresholds
 
-This repository runs fast, deterministic **Node smoke workloads** inside CI (`npm run benchmark:native-smoke`). Full emulator harnesses belong in downstream apps until a dedicated RN test target lands here.
+This repository runs fast, deterministic **Node smoke workloads** inside CI (`npm run benchmark:native-smoke`). Full iOS app-level E2E runs in a consumer repository (see `docs/EXTERNAL_IOS_E2E_LANE.md`).
 
 | Script | What it validates | Typical healthy range on GitHub-hosted runners |
 | ------ | ----------------- | --------------------------------------------- |
@@ -20,5 +20,7 @@ Nightly lane `nightly-native-bench` executes:
 - Android runtime smoke on emulator (`connectedAndroidTest`)
 - iOS runtime smoke via native ObjC++ bridge binary (`scripts/ios-runtime-smoke.sh`)
 - Node/bridge smoke + stress soak (`benchmark:native-smoke`, `stress:soak`)
+
+Reliability SLA tracking is defined in `docs/RELIABILITY_LAB_SCORECARD.md`.
 
 When adding a hosted emulator/simulator lane, duplicate the matrix here with device-specific SLA numbers and link to the workflow artifact.

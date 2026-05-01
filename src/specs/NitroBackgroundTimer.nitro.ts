@@ -12,6 +12,12 @@ export interface NitroBackgroundTimer extends HybridObject<{
     group: string,
     driftPolicy: string,
     maxRuns: number,
+    correlationToken: number,
+    retryMaxAttempts: number,
+    retryInitialBackoffMs: number,
+    cancellationToken: string,
+    tagMask: number,
+    policyProfile: string,
     callback: (id: number) => void
   ): number
   cancel(id: number): void

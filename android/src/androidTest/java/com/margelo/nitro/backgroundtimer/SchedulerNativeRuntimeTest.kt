@@ -21,7 +21,8 @@ class SchedulerNativeRuntimeTest {
         1L,
         "runtime",
         "coalesce",
-        1
+        1,
+        "{}"
       )
 
       val pairs = SchedulerNative.nativePopDuePairs(handle, now + 50L)

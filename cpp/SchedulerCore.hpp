@@ -21,6 +21,7 @@ struct TaskRecord {
   std::optional<int32_t> maxRuns;
   int32_t runCount;
   bool paused;
+  std::string metadataJson;
 };
 
 struct SchedulerStats {

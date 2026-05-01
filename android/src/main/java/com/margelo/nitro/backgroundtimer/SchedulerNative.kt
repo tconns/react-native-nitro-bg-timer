@@ -21,7 +21,8 @@ internal object SchedulerNative {
     intervalMs: Long,
     group: String,
     driftPolicy: String,
-    maxRuns: Int
+    maxRuns: Int,
+    metadataJson: String
   )
 
   external fun nativeCancel(handle: Long, id: Int): Unit
@@ -58,6 +59,7 @@ internal object SchedulerNative {
     driftPolicy: String,
     maxRuns: Int,
     runCount: Int,
-    paused: Boolean
+    paused: Boolean,
+    metadataJson: String
   )
 }
