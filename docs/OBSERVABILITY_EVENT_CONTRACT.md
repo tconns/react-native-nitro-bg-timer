@@ -12,6 +12,11 @@ This document defines a stable telemetry contract for host applications.
 - `expired`
 - `restored`
 
+Current implementation status:
+
+- JS emitter: `scheduled`, `fired`, `cancelled`, `restored`, `expired`, `retry`, `missed`
+- Native emitter parity: in progress
+
 ## Common fields
 
 - `timerId` (number)
@@ -22,6 +27,19 @@ This document defines a stable telemetry contract for host applications.
 - `driftMs` (number, optional)
 - `attempt` (number, optional)
 - `reason` (string, optional)
+
+## Reason codes (initial)
+
+- `handle_cancel`
+- `clearTimeout`
+- `clearInterval`
+- `cancelGroup`
+- `manual_restore`
+- `restore_rejected_invalid_json`
+- `restore_rejected_unsupported_version`
+- `restore_rejected_tasks_not_array`
+- `callback_error`
+- `metadata_quota_exceeded`
 
 ## Metadata safety constraints
 

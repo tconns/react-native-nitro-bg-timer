@@ -7,6 +7,7 @@
 namespace nitro_bt_scheduler {
 
 namespace {
+constexpr size_t kMaxMetadataBytes = 4096;
 
 std::string jsonEscapeToken(const std::string& raw) {
   std::ostringstream out;
@@ -24,6 +25,22 @@ std::string jsonEscapeToken(const std::string& raw) {
   return out.str();
 }
 
+std::string sanitizeMetadataJson(std::string raw) {
+  if (raw.empty()) {
+    return "{}";
+  }
+  if (raw.size() > kMaxMetadataBytes) {
+    raw.resize(kMaxMetadataBytes);
+  }
+  for (char& c : raw) {
+    const unsigned char uc = static_cast<unsigned char>(c);
+    if (uc < 0x20) {
+      c = ' ';
+    }
+  }
+  return raw;
+}
+
 }  // namespace
 
 void SchedulerCore::schedule(TaskRecord task) {
@@ -31,6 +48,7 @@ void SchedulerCore::schedule(TaskRecord task) {
   cancel(task.id);
   task.runCount = 0;
   task.paused = false;
+  task.metadataJson = sanitizeMetadataJson(task.metadataJson);
   tasksById_[task.id] = task;
   const uint64_t generation = ++generations_[task.id];
   queue_.push(QueueEntry{task.dueAtMs, task.id, generation});
@@ -245,6 +263,7 @@ void SchedulerCore::clearAllTasks() {
 
 void SchedulerCore::importTaskRecord(TaskRecord task) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  task.metadataJson = sanitizeMetadataJson(task.metadataJson);
   tasksById_[task.id] = task;
   const uint64_t generation = ++generations_[task.id];
   if (!task.paused) {

@@ -20,7 +20,9 @@ Nightly lane `nightly-native-bench` executes:
 - Android runtime smoke on emulator (`connectedAndroidTest`)
 - iOS runtime smoke via native ObjC++ bridge binary (`scripts/ios-runtime-smoke.sh`)
 - Node/bridge smoke + stress soak (`benchmark:native-smoke`, `stress:soak`)
+- Uploads `native-stress-summaries` artifact containing smoke + soak p50/p95/heap summaries
 
 Reliability SLA tracking is defined in `docs/RELIABILITY_LAB_SCORECARD.md`.
+Competitive cadence is defined in `docs/COMPETITIVE_BENCHMARK_POLICY.md`.
 
 When adding a hosted emulator/simulator lane, duplicate the matrix here with device-specific SLA numbers and link to the workflow artifact.

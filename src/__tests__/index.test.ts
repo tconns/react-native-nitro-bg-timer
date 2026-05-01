@@ -4,7 +4,12 @@ import {
   NitroBackgroundTimer,
   setNitroBackgroundTimerForTests,
 } from '../nitro-timer-proxy'
-import { cronToIntervalMs, tagMaskFromStrings } from '../scheduler-utils'
+import {
+  cronToIntervalMs,
+  normalizeRetryPolicy,
+  tagMaskFromStrings,
+  validatePersistWireSchema,
+} from '../scheduler-utils'
 
 test('supports cron interval shorthand', () => {
   assert.equal(cronToIntervalMs('*/2 * * * *'), 120000)
@@ -74,4 +79,37 @@ test('accepts retry/token/tag/policy fields on typed bridge schedule', () => {
   assert.equal(captured[11], 99)
   assert.equal(captured[12], 'latencyFirst')
   assert.equal(typeof captured[13], 'function')
+})
+
+test('normalizes retry policy to safe integer bounds', () => {
+  assert.deepEqual(normalizeRetryPolicy(undefined), {
+    maxAttempts: 0,
+    initialBackoffMs: 0,
+  })
+  assert.deepEqual(
+    normalizeRetryPolicy({ maxAttempts: -9, initialBackoffMs: -200 }),
+    { maxAttempts: 0, initialBackoffMs: 0 }
+  )
+  assert.deepEqual(
+    normalizeRetryPolicy({ maxAttempts: 3.7, initialBackoffMs: 250.9 }),
+    { maxAttempts: 3, initialBackoffMs: 250 }
+  )
+})
+
+test('validates persist wire schema version/tasks shape', () => {
+  assert.deepEqual(validatePersistWireSchema('{"version":1,"tasks":[]}'), {
+    valid: true,
+  })
+  assert.deepEqual(validatePersistWireSchema('{"version":2,"tasks":[]}'), {
+    valid: false,
+    reason: 'unsupported_version',
+  })
+  assert.deepEqual(validatePersistWireSchema('{"version":1,"tasks":{}}'), {
+    valid: false,
+    reason: 'tasks_not_array',
+  })
+  assert.deepEqual(validatePersistWireSchema('nope'), {
+    valid: false,
+    reason: 'invalid_json',
+  })
 })

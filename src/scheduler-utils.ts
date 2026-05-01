@@ -3,6 +3,16 @@
 const FNV32_OFFSET = 0x811c9dc5 >>> 0
 const FNV32_PRIME = 0x01000193 >>> 0
 
+export interface RetryPolicyInput {
+  maxAttempts?: number
+  initialBackoffMs?: number
+}
+
+export interface RetryPolicyNormalized {
+  maxAttempts: number
+  initialBackoffMs: number
+}
+
 export function cronToIntervalMs(expression: string): number {
   const trimmed = expression.trim()
   if (/^\*\/\d+ \* \* \* \*$/.test(trimmed)) {
@@ -35,4 +45,36 @@ export function tagMaskFromStrings(tags: readonly string[]): number {
     mix()
   }
   return hash >>> 0
+}
+
+export function normalizeRetryPolicy(
+  input: RetryPolicyInput | undefined
+): RetryPolicyNormalized {
+  const maxAttemptsRaw = input?.maxAttempts ?? 0
+  const initialBackoffRaw = input?.initialBackoffMs ?? 0
+  const maxAttempts = Number.isFinite(maxAttemptsRaw)
+    ? Math.max(0, Math.trunc(maxAttemptsRaw))
+    : 0
+  const initialBackoffMs = Number.isFinite(initialBackoffRaw)
+    ? Math.max(0, Math.trunc(initialBackoffRaw))
+    : 0
+  return { maxAttempts, initialBackoffMs }
+}
+
+export function validatePersistWireSchema(wireJson: string): {
+  valid: boolean
+  reason?: string
+} {
+  try {
+    const raw = JSON.parse(wireJson) as { version?: number; tasks?: unknown }
+    if (raw.version !== 1) {
+      return { valid: false, reason: 'unsupported_version' }
+    }
+    if (!Array.isArray(raw.tasks)) {
+      return { valid: false, reason: 'tasks_not_array' }
+    }
+    return { valid: true }
+  } catch {
+    return { valid: false, reason: 'invalid_json' }
+  }
 }

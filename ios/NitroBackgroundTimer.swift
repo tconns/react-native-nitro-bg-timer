@@ -16,6 +16,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
 
   private static let defaultGroup = "default"
   private static let latenessP95RecalcInterval = 16
+  private static let maxMetadataBytes = 4096
 
   private struct ScheduledTask {
     let id: Int
@@ -247,6 +248,26 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
       return "{}"
     }
     return String(data: data, encoding: .utf8) ?? "{}"
+  }
+
+  private func normalizeMetadataJson(_ raw: String) -> String {
+    let clipped = String(raw.prefix(Self.maxMetadataBytes))
+    guard let data = clipped.data(using: .utf8),
+          let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      return "{}"
+    }
+    let payload: [String: Any] = [
+      "correlationToken": (parsed["correlationToken"] as? NSNumber)?.int64Value ?? 0,
+      "retryMaxAttempts": (parsed["retryMaxAttempts"] as? NSNumber)?.intValue ?? 0,
+      "retryInitialBackoffMs": (parsed["retryInitialBackoffMs"] as? NSNumber)?.int64Value ?? 0,
+      "cancellationToken": (parsed["cancellationToken"] as? String) ?? "",
+      "tagMask": (parsed["tagMask"] as? NSNumber)?.int64Value ?? 0,
+      "policyProfile": (parsed["policyProfile"] as? String) ?? "balanced",
+    ]
+    guard let normalized = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+      return "{}"
+    }
+    return String(data: normalized, encoding: .utf8) ?? "{}"
   }
 
   private func applyPolicyProfile(
@@ -560,7 +581,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
           let paused =
             (t["paused"] as? Bool)
               ?? ((t["paused"] as? NSNumber)?.boolValue ?? false)
-          let metadataJson = (t["metadataJson"] as? String) ?? ""
+          let metadataJson = normalizeMetadataJson((t["metadataJson"] as? String) ?? "")
 
           bridge.importTask(
             timerId: idNum,

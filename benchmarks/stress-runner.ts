@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -159,6 +160,19 @@ function main(): void {
       1
     )}ms, heapDelta=${heapDeltaMb.toFixed(2)}MB`
   )
+  const summary = {
+    benchmark: 'stress-runner',
+    rounds,
+    n,
+    p50Ms: Number(p50.toFixed(3)),
+    p95Ms: Number(p95.toFixed(3)),
+    heapDeltaMb: Number(heapDeltaMb.toFixed(3)),
+    timestampMs: Date.now(),
+  }
+  const outPath = process.env.NITRO_BG_STRESS_SUMMARY_PATH
+  if (outPath) {
+    fs.writeFileSync(outPath, `${JSON.stringify(summary, null, 2)}\n`)
+  }
   if (p95 > ceiling) {
     console.error('stress-runner: exceeded ceiling — treat as regression signal')
     process.exit(1)

@@ -33,6 +33,7 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     private const val LATENESS_SAMPLE_WINDOW = 256
     private const val LATENESS_P95_RECALC_INTERVAL = 16
     private const val SCHED_MAX_RUN_UNLIMITED = -1
+    private const val MAX_METADATA_BYTES = 4096
   }
 
   private data class ScheduledTask(
@@ -308,6 +309,23 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
       put("tagMask", tagMask)
       put("policyProfile", policyProfile)
     }.toString()
+
+  private fun normalizeMetadataJson(raw: String): String {
+    val safeRaw = raw.take(MAX_METADATA_BYTES)
+    return try {
+      val parsed = JSONObject(safeRaw)
+      JSONObject().apply {
+        put("correlationToken", parsed.optLong("correlationToken", 0L))
+        put("retryMaxAttempts", parsed.optInt("retryMaxAttempts", 0))
+        put("retryInitialBackoffMs", parsed.optLong("retryInitialBackoffMs", 0L))
+        put("cancellationToken", parsed.optString("cancellationToken", ""))
+        put("tagMask", parsed.optLong("tagMask", 0L))
+        put("policyProfile", parsed.optString("policyProfile", "balanced"))
+      }.toString()
+    } catch (_: Exception) {
+      "{}"
+    }
+  }
 
   private fun applyPolicyProfile(profile: String, retryMax: Int, retryBackoffMs: Long): Pair<Int, Long> =
     when (profile) {
@@ -600,7 +618,7 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
             o.optInt("maxRuns", SCHED_MAX_RUN_UNLIMITED),
             o.optInt("runCount", 0),
             o.optBoolean("paused", false),
-            o.optString("metadataJson", ""),
+            normalizeMetadataJson(o.optString("metadataJson", "")),
           )
         }
         scheduleNextTickCppLocked()
