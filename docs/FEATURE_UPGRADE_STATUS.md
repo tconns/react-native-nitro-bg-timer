@@ -65,7 +65,7 @@ Last updated for: **1.x stabilization track**
 | Gate | Status | Notes |
 | --- | --- | --- |
 | `npm run verify:release` | ✅ done | Mandatory pre-publish gate |
-| Nightly native bench workflow | ✅ done | Runtime smoke + stress lanes are tracked |
+| Hosted GitHub Actions workflows | ➖ n/a | Disabled to avoid hosted CI cost; run verification manually/local CI |
 | Docs synchronized with implementation | ✅ done | Status/governance/migration docs are aligned for current release candidate |
 | Governance policy published | ✅ done | See `docs/RELEASE_GOVERNANCE.md` |
 

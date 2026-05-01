@@ -20,6 +20,7 @@
 ## Required gates before stable
 
 - `npm run verify:release` green
-- nightly runtime workflow green for 3 consecutive runs
+- if using hosted CI: nightly/runtime workflow green for 3 consecutive runs
+- if not using hosted CI: run equivalent local/self-hosted verification and keep artifacts for last 3 runs
 - reliability scorecard trend non-regressing for last 3 builds
 - feature status rows updated (`done`/`blocked` with reason)
