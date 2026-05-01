@@ -1,28 +1,29 @@
-# Native / bridge benchmark thresholds
+# Native and Bridge Benchmark Thresholds
 
-This repository runs fast, deterministic **Node smoke workloads** inside CI (`npm run benchmark:native-smoke`). Full iOS app-level E2E runs in a consumer repository (see `docs/EXTERNAL_IOS_E2E_LANE.md`).
+This document defines the baseline thresholds for CI and nightly performance lanes.
 
-| Script | What it validates | Typical healthy range on GitHub-hosted runners |
-| ------ | ----------------- | --------------------------------------------- |
-| `benchmark:node` | JS scheduling harness throughput | Completes without throwing; timings logged for manual diff |
-| `benchmark:bridge` | Typed façade vs mocked JSON payloads | Completes without throwing; regressions surfaced by inspecting printed ratios locally |
-| `stress:smoke` | 5 rounds x 25k `schedule`/`cancel`/`persist` calls via mocked Nitro hybrids | **p95 `≤ 800ms`** and heap delta **`≤ 32MB`** (`NITRO_BG_STRESS_MAX_MS`, `NITRO_BG_STRESS_MAX_HEAP_MB`) |
-| `stress:soak` | 40 rounds stress for leak trend checks | p95 `≤ 2000ms` and heap delta `≤ 64MB` |
+## Benchmarks in scope
 
-Tune `NITRO_BG_STRESS_MAX_MS` in constrained CI if runners throttle:
+| Script | Purpose | Baseline threshold |
+| --- | --- | --- |
+| `benchmark:node` | JS scheduling throughput baseline | Must complete without errors |
+| `benchmark:bridge` | Typed vs JSON bridge overhead signal | Must complete without errors |
+| `benchmark:core-native` | Real C++ scheduler core load | Must complete without errors |
+| `stress:smoke` | 5 rounds stress (`schedule`/`cancel`/`persist`) | `p95 <= 800ms`, heap delta `<= 32MB` |
+| `stress:soak` | 40 rounds leak trend signal | `p95 <= 2000ms`, heap delta `<= 64MB` |
+
+Tune thresholds in constrained CI environments with:
 
 ```bash
 NITRO_BG_STRESS_MAX_MS=1200 NITRO_BG_STRESS_MAX_HEAP_MB=48 npm run stress:smoke
 ```
 
-Nightly lane `nightly-native-bench` executes:
+## CI lanes
 
-- Android runtime smoke on emulator (`connectedAndroidTest`)
-- iOS runtime smoke via native ObjC++ bridge binary (`scripts/ios-runtime-smoke.sh`)
-- Node/bridge smoke + stress soak (`benchmark:native-smoke`, `stress:soak`)
-- Uploads `native-stress-summaries` artifact containing smoke + soak p50/p95/heap summaries
+- `benchmark:native-smoke` runs node + bridge + native core benchmark + smoke stress.
+- Nightly workflow runs runtime smoke (Android/iOS) and stress soak with summary artifacts.
 
-Reliability SLA tracking is defined in `docs/RELIABILITY_LAB_SCORECARD.md`.
-Competitive cadence is defined in `docs/COMPETITIVE_BENCHMARK_POLICY.md`.
+## Related docs
 
-When adding a hosted emulator/simulator lane, duplicate the matrix here with device-specific SLA numbers and link to the workflow artifact.
+- `docs/RELIABILITY_LAB_SCORECARD.md`
+- `docs/FEATURE_UPGRADE_STATUS.md`
