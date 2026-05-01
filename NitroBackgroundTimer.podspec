@@ -13,16 +13,19 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/tconns/react-native-nitro-bg-timer.git", :tag => "#{s.version}" }
 
   s.source_files = [
-    # Implementation (Swift)
-    "ios/**/*.{swift}",
-    # Autolinking/Registration (Objective-C++)
-    "ios/**/*.{m,mm}",
+    # Implementation (Swift + ObjC++ bridge)
+    "ios/**/*.{swift,h,m,mm}",
     # Implementation (C++ objects)
     "cpp/**/*.{hpp,cpp}",
   ]
 
   load 'nitrogen/generated/ios/NitroBackgroundTimer+autolinking.rb'
   add_nitrogen_files(s)
+
+  # IMPORTANT: Nitrogen merges public_header_patterns into the spec attrs; never replace with a
+  # bare string afterward. CocoaPods has no `.public_header_files` getter — read from attrs.
+  nitrogen_public = Array(s.attributes_hash.fetch('public_header_files', []))
+  s.public_header_files = nitrogen_public + ['ios/SchedulerBridge.h']
 
   s.dependency 'React-jsi'
   s.dependency 'React-callinvoker'

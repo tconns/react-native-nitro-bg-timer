@@ -21,6 +21,18 @@ export interface NitroBackgroundTimer extends HybridObject<{
   listActiveTimerIds(): number[]
   getStatsJson(): string
 
+  /**
+   * Wire snapshot of active native tasks (no JS callbacks). For C++ engine only;
+   * JS must re-bind work after process relaunch.
+   */
+  getPersistWireJson(): string
+
+  /**
+   * Replaces the native scheduler queue from `getPersistWireJson()` output.
+   * Callbacks are not restored; schedule JS work again for returned ids if needed.
+   */
+  restorePersistWireJson(wireJson: string): void
+
   setTimeout(
     id: number,
     duration: number,

@@ -85,6 +85,17 @@ npm run benchmark:node
 npm run benchmark:bridge
 ```
 
+CI encodes the same trio (plus a typed façade stress harness) via `npm run benchmark:native-smoke`, which executes `benchmark:node`, `benchmark:bridge`, and `stress:smoke`.
+
+- Thresholds live in [`docs/NATIVE_BENCH_THRESHOLDS.md`](./docs/NATIVE_BENCH_THRESHOLDS.md).
+- Set `NITRO_BG_STRESS_MAX_MS` locally if constrained runners regress on wall time alone.
+
+Release / soak checklist additions:
+
+1. Run `npm run benchmark:native-smoke` twice back-to-back; compare logs for wild drift.
+2. Exercise native persistence snapshots on both platforms (`getPersistWireJson` followed by controlled `restorePersistWireJson` in staging).
+3. For long-running QA, alternate foreground/background on hardware while stressing group pause/resume (see roadmap stress scripts).
+
 Optional package verification:
 
 ```sh

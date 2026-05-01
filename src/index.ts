@@ -1,67 +1,12 @@
+import './nitro-native-bootstrap'
 import EventEmitter from 'eventemitter3'
-import { NitroModules } from 'react-native-nitro-modules'
-import type { NitroBackgroundTimer as NitroBackgroundTimerSpec } from './specs/NitroBackgroundTimer.nitro'
-import { cronToIntervalMs } from './scheduler-utils'
+import {
+  NitroBackgroundTimer,
+  setNitroBackgroundTimerForTests,
+} from './nitro-timer-proxy'
+import { cronToIntervalMs, tagMaskFromStrings } from './scheduler-utils'
 
-type NativeTimerLike = Pick<
-  NitroBackgroundTimerSpec,
-  | 'schedule'
-  | 'cancel'
-  | 'pauseGroup'
-  | 'resumeGroup'
-  | 'cancelGroup'
-  | 'listActiveTimerIds'
-  | 'getStatsJson'
-  | 'setTimeout'
-  | 'clearTimeout'
-  | 'setInterval'
-  | 'clearInterval'
->
-
-let nativeTimerInstance: NativeTimerLike | null = null
-
-function getNativeTimer(): NativeTimerLike {
-  if (nativeTimerInstance == null) {
-    nativeTimerInstance =
-      NitroModules.createHybridObject<NitroBackgroundTimerSpec>(
-        'NitroBackgroundTimer'
-      )
-  }
-  return nativeTimerInstance
-}
-
-export function setNitroBackgroundTimerForTests(timer: NativeTimerLike) {
-  nativeTimerInstance = timer
-}
-
-export const NitroBackgroundTimer = {
-  schedule: (...args: Parameters<NitroBackgroundTimerSpec['schedule']>) =>
-    getNativeTimer().schedule(...args),
-  cancel: (...args: Parameters<NitroBackgroundTimerSpec['cancel']>) =>
-    getNativeTimer().cancel(...args),
-  pauseGroup: (...args: Parameters<NitroBackgroundTimerSpec['pauseGroup']>) =>
-    getNativeTimer().pauseGroup(...args),
-  resumeGroup: (...args: Parameters<NitroBackgroundTimerSpec['resumeGroup']>) =>
-    getNativeTimer().resumeGroup(...args),
-  cancelGroup: (...args: Parameters<NitroBackgroundTimerSpec['cancelGroup']>) =>
-    getNativeTimer().cancelGroup(...args),
-  listActiveTimerIds: (
-    ...args: Parameters<NitroBackgroundTimerSpec['listActiveTimerIds']>
-  ) => getNativeTimer().listActiveTimerIds(...args),
-  getStatsJson: (
-    ...args: Parameters<NitroBackgroundTimerSpec['getStatsJson']>
-  ) => getNativeTimer().getStatsJson(...args),
-  setTimeout: (...args: Parameters<NitroBackgroundTimerSpec['setTimeout']>) =>
-    getNativeTimer().setTimeout(...args),
-  clearTimeout: (
-    ...args: Parameters<NitroBackgroundTimerSpec['clearTimeout']>
-  ) => getNativeTimer().clearTimeout(...args),
-  setInterval: (...args: Parameters<NitroBackgroundTimerSpec['setInterval']>) =>
-    getNativeTimer().setInterval(...args),
-  clearInterval: (
-    ...args: Parameters<NitroBackgroundTimerSpec['clearInterval']>
-  ) => getNativeTimer().clearInterval(...args),
-}
+export { NitroBackgroundTimer, setNitroBackgroundTimerForTests }
 
 let nextId = 1
 const timeoutCallbacks = new Map<number, () => void>()
@@ -78,9 +23,21 @@ export interface ScheduleOptions {
   intervalMs?: number
   runAtMs?: number
   group?: string
+  /** Hint for upcoming native routing; not forwarded on the Nitro bridge today. */
   priority?: TimerPriority
   driftPolicy?: DriftPolicy
   maxRuns?: number
+  /**
+   * Opaque bitmask for tagging — use {@link tagMaskFromStrings}.
+   * Kept client-side unless you enrich the native wire separately.
+   */
+  tagMaskHint?: number
+  /** Convenience: populated into `tagMaskHint` unless you override it explicitly. */
+  tags?: readonly string[]
+  /** Correlation for app telemetry — not persisted in the native wire yet. */
+  correlationToken?: number
+  retryMaxAttempts?: number
+  retryInitialBackoffMs?: number
 }
 
 export interface SchedulerStats {
@@ -101,7 +58,24 @@ export interface ScheduledTaskHandle {
 
 const DEFAULT_GROUP = 'default'
 
+const STATS_EMIT_MIN_INTERVAL_MS = 250
+let lastStatsEmitAt = 0
+
+function emitStatsThrottled(): void {
+  const now = Date.now()
+  if (now - lastStatsEmitAt >= STATS_EMIT_MIN_INTERVAL_MS) {
+    lastStatsEmitAt = now
+    schedulerEvents.emit('stats', safeReadStats())
+  }
+}
+
 function normalizeOptions(options: ScheduleOptions): ScheduleOptions {
+  const tagHint =
+    options.tagMaskHint ??
+    (options.tags != null && options.tags.length > 0
+      ? tagMaskFromStrings(options.tags)
+      : undefined)
+
   return {
     kind: options.kind,
     intervalMs: options.intervalMs,
@@ -110,6 +84,17 @@ function normalizeOptions(options: ScheduleOptions): ScheduleOptions {
     priority: options.priority ?? 'interactive',
     driftPolicy: options.driftPolicy ?? 'coalesce',
     maxRuns: options.maxRuns,
+    ...(tagHint !== undefined ? { tagMaskHint: tagHint } : {}),
+    ...(options.tags != null ? { tags: [...options.tags] } : {}),
+    ...(options.correlationToken !== undefined
+      ? { correlationToken: options.correlationToken }
+      : {}),
+    ...(options.retryMaxAttempts !== undefined
+      ? { retryMaxAttempts: options.retryMaxAttempts }
+      : {}),
+    ...(options.retryInitialBackoffMs !== undefined
+      ? { retryInitialBackoffMs: options.retryInitialBackoffMs }
+      : {}),
   }
 }
 
@@ -173,7 +158,7 @@ export const BackgroundTimer = {
       normalized.maxRuns ?? 0,
       () => {
         runAndCleanup(id)
-        schedulerEvents.emit('stats', safeReadStats())
+        emitStatsThrottled()
       }
     )
     return {
@@ -302,6 +287,8 @@ export const BackgroundScheduler = {
     })
   },
 }
+
+export { cronToIntervalMs, tagMaskFromStrings }
 
 export function clearAllKnownTimers() {
   for (const [id] of timeoutCallbacks) {

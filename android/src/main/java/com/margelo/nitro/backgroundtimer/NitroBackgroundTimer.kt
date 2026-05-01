@@ -7,20 +7,32 @@ import android.os.PowerManager
 import android.util.Log
 import com.facebook.proguard.annotations.DoNotStrip
 import com.margelo.nitro.NitroModules
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.PriorityQueue
 import kotlin.math.roundToLong
 
 @DoNotStrip
 class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
+
   private val context = NitroModules.applicationContext
     ?: throw IllegalStateException("NitroModules.applicationContext is null")
+
   private val handler = Handler(Looper.getMainLooper())
-  private val powerManager = context.getSystemService(android.content.Context.POWER_SERVICE) as PowerManager
+  private val powerManager =
+    context.getSystemService(android.content.Context.POWER_SERVICE) as PowerManager
 
   @SuppressLint("InvalidWakeLockTag")
   private val wakeLock: PowerManager.WakeLock =
     powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NitroBackgroundTimer")
+
+  private val useCpp = BuildConfig.USE_CPP_SCHEDULER
+
+  companion object {
+    private const val DEFAULT_GROUP = "default"
+    private const val LATENESS_SAMPLE_WINDOW = 256
+    private const val SCHED_MAX_RUN_UNLIMITED = -1
+  }
 
   private data class ScheduledTask(
     val id: Int,
@@ -37,48 +49,91 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
 
   private val tasksById = HashMap<Int, ScheduledTask>()
   private val queue = PriorityQueue<ScheduledTask>(compareBy { it.nextRunAtMs })
-  private var tickScheduled = false
+  private var tickKotlinScheduled = false
+  private lateinit var tickKotlinRunnable: Runnable
+  private val stateLock = Any()
+
   private var callbackCount = 0L
   private var missedCount = 0L
   private var wakeupCount = 0L
+
+  private val cppSync = Any()
+  private var cppHandle: Long = 0
+  private val cppCallbacks = HashMap<Int, (Double) -> Unit>()
+  private lateinit var cppTickRunnable: Runnable
+  private var tickCppScheduled = false
+
   private var lateDispatchCount = 0L
   private var latenessTotalMs = 0L
   private var p95LatenessMs = 0L
   private val latenessSamples = ArrayDeque<Long>()
-  private val stateLock = Any()
 
-  private val tickRunnable = Runnable {
-    synchronized(stateLock) {
-      tickScheduled = false
+  init {
+    tickKotlinRunnable = Runnable {
+      synchronized(stateLock) {
+        tickKotlinScheduled = false
+      }
+      runDueTasksKotlin()
     }
-    runDueTasks()
-  }
 
-  companion object {
-    private const val DEFAULT_GROUP = "default"
-    private const val LATENESS_SAMPLE_WINDOW = 256
+    cppTickRunnable = Runnable {
+      synchronized(cppSync) {
+        tickCppScheduled = false
+      }
+      runDueTasksCpp()
+    }
+
+    if (useCpp) {
+      cppHandle = SchedulerNative.nativeCreate()
+    }
   }
 
   @SuppressLint("WakelockTimeout")
-  private fun acquireWakeLock() {
-    synchronized(stateLock) {
-      if (!wakeLock.isHeld) {
-        wakeLock.acquire()
-      }
+  private fun acquireWakeLockIfNeededLocked() {
+    if (!wakeLock.isHeld) {
+      wakeLock.acquire()
     }
   }
 
   private fun releaseWakeLockIfNeeded() {
-    synchronized(stateLock) {
-      if (tasksById.isEmpty() && wakeLock.isHeld) {
-        wakeLock.release()
+    if (useCpp) {
+      synchronized(cppSync) {
+        if (cppHandle == 0L) {
+          if (wakeLock.isHeld) wakeLock.release()
+          return
+        }
+        val ids = SchedulerNative.nativeListActiveIds(cppHandle)
+        if (ids.isEmpty() && wakeLock.isHeld) {
+          wakeLock.release()
+        }
+      }
+    } else {
+      synchronized(stateLock) {
+        if (tasksById.isEmpty() && wakeLock.isHeld) {
+          wakeLock.release()
+        }
       }
     }
   }
 
-  private fun compactQueueLocked() {
+  private fun recordLateness(latenessMs: Long) {
+    if (latenessMs <= 0L) return
+    lateDispatchCount += 1
+    latenessTotalMs += latenessMs
+    latenessSamples.addLast(latenessMs)
+    if (latenessSamples.size > LATENESS_SAMPLE_WINDOW) {
+      latenessSamples.removeFirst()
+    }
+    val sorted = latenessSamples.toList().sorted()
+    if (sorted.isNotEmpty()) {
+      val index = ((sorted.size - 1) * 0.95).roundToLong().toInt().coerceIn(0, sorted.size - 1)
+      p95LatenessMs = sorted[index]
+    }
+  }
+
+  private fun compactQueueLockedKotlin() {
     while (queue.isNotEmpty()) {
-      val top = queue.peek()
+      val top = queue.peek() ?: break
       val liveTask = tasksById[top.id]
       if (liveTask == null || liveTask !== top || top.paused) {
         queue.poll()
@@ -88,29 +143,30 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     }
   }
 
-  private fun scheduleNextTickLocked() {
-    compactQueueLocked()
+  private fun scheduleNextTickKotlinLocked() {
+    compactQueueLockedKotlin()
     if (queue.isEmpty()) {
-      handler.removeCallbacks(tickRunnable)
-      tickScheduled = false
+      handler.removeCallbacks(tickKotlinRunnable)
+      tickKotlinScheduled = false
       releaseWakeLockIfNeeded()
       return
     }
-    val next = queue.peek()
+    val next = queue.peek() ?: return
     val delay = (next.nextRunAtMs - System.currentTimeMillis()).coerceAtLeast(0L)
-    handler.removeCallbacks(tickRunnable)
-    handler.postDelayed(tickRunnable, delay)
-    tickScheduled = true
+    handler.removeCallbacks(tickKotlinRunnable)
+    handler.postDelayed(tickKotlinRunnable, delay)
+    tickKotlinScheduled = true
   }
 
-  private fun runDueTasks() {
+  private fun runDueTasksKotlin() {
+    if (useCpp) return
     val now = System.currentTimeMillis()
     val due = ArrayList<ScheduledTask>()
 
     synchronized(stateLock) {
-      compactQueueLocked()
+      compactQueueLockedKotlin()
       while (queue.isNotEmpty()) {
-        val top = queue.peek()
+        val top = queue.peek() ?: break
         if (top.nextRunAtMs > now) {
           break
         }
@@ -131,14 +187,21 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
         task.callback(task.id.toDouble())
         callbackCount += 1
       } catch (e: Exception) {
-        Log.e("NitroBackgroundTimer", "Callback error for timer ${task.id}: ${e.message}", e)
+        Log.e(
+          "NitroBackgroundTimer",
+          "Callback error for timer ${task.id}: ${e.message}",
+          e
+        )
       }
 
       synchronized(stateLock) {
         val active = tasksById[task.id]
         if (active != null && active === task) {
           active.runCount += 1
-          if (active.mode == "interval" && (active.maxRuns == null || active.runCount < active.maxRuns)) {
+          if (
+            active.mode == "interval" &&
+            (active.maxRuns == null || active.runCount < active.maxRuns)
+          ) {
             val intervalMs = active.intervalMs.coerceAtLeast(1L)
             val targetNext = when (active.driftPolicy) {
               "catchUp" -> active.nextRunAtMs + intervalMs
@@ -158,23 +221,62 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     }
 
     synchronized(stateLock) {
-      scheduleNextTickLocked()
+      scheduleNextTickKotlinLocked()
     }
+    releaseWakeLockIfNeeded()
   }
 
-  private fun recordLateness(latenessMs: Long) {
-    if (latenessMs <= 0L) return
-    lateDispatchCount += 1
-    latenessTotalMs += latenessMs
-    latenessSamples.addLast(latenessMs)
-    if (latenessSamples.size > LATENESS_SAMPLE_WINDOW) {
-      latenessSamples.removeFirst()
+  private fun scheduleNextTickCppLocked() {
+    if (cppHandle == 0L) {
+      handler.removeCallbacks(cppTickRunnable)
+      tickCppScheduled = false
+      releaseWakeLockIfNeeded()
+      return
     }
-    val sorted = latenessSamples.toList().sorted()
-    if (sorted.isNotEmpty()) {
-      val index = ((sorted.size - 1) * 0.95).roundToLong().toInt().coerceIn(0, sorted.size - 1)
-      p95LatenessMs = sorted[index]
+    val nextDue = SchedulerNative.nativeNextDueMs(cppHandle, System.currentTimeMillis())
+    if (nextDue == Long.MIN_VALUE) {
+      handler.removeCallbacks(cppTickRunnable)
+      tickCppScheduled = false
+      releaseWakeLockIfNeeded()
+      return
     }
+    val delay = (nextDue - System.currentTimeMillis()).coerceAtLeast(0L)
+    handler.removeCallbacks(cppTickRunnable)
+    handler.postDelayed(cppTickRunnable, delay)
+    tickCppScheduled = true
+  }
+
+  private fun runDueTasksCpp() {
+    if (!useCpp || cppHandle == 0L) return
+    val now = System.currentTimeMillis()
+    val pairs = synchronized(cppSync) {
+      SchedulerNative.nativePopDuePairs(cppHandle, now)
+    }
+    var idx = 0
+    while (idx + 1 < pairs.size) {
+      val id = pairs[idx].toInt()
+      val scheduledDue = pairs[idx + 1]
+      recordLateness(now - scheduledDue)
+      val cb = synchronized(cppSync) {
+        cppCallbacks[id]
+      }
+      try {
+        cb?.invoke(id.toDouble())
+      } catch (e: Exception) {
+        Log.e("NitroBackgroundTimer", "Callback error for timer $id: ${e.message}", e)
+      }
+      synchronized(cppSync) {
+        if (cppHandle != 0L && !SchedulerNative.nativeIsActive(cppHandle, id)) {
+          cppCallbacks.remove(id)
+        }
+      }
+      idx += 2
+    }
+
+    synchronized(cppSync) {
+      scheduleNextTickCppLocked()
+    }
+    releaseWakeLockIfNeeded()
   }
 
   override fun schedule(
@@ -191,12 +293,31 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     cancel(id)
     val normalizedKind = if (kind == "interval") "interval" else "timeout"
     val normalizedGroup = group.ifBlank { DEFAULT_GROUP }
-    val normalizedMaxRuns = if (maxRuns <= 0.0) null else maxRuns.toInt()
+    val mrInt = if (maxRuns <= 0.0) SCHED_MAX_RUN_UNLIMITED else maxRuns.toInt()
     val normalizedIntervalMs = intervalMs.toLong().coerceAtLeast(1L)
 
-    acquireWakeLock()
+    if (useCpp) {
+      synchronized(cppSync) {
+        acquireWakeLockIfNeededLocked()
+        cppCallbacks[intId] = callback
+        val dueAt = System.currentTimeMillis() + delayMs.toLong().coerceAtLeast(0L)
+        SchedulerNative.nativeSchedule(
+          cppHandle,
+          intId,
+          dueAt,
+          normalizedKind,
+          normalizedIntervalMs,
+          normalizedGroup,
+          driftPolicy,
+          mrInt
+        )
+        scheduleNextTickCppLocked()
+      }
+      return id
+    }
 
     synchronized(stateLock) {
+      acquireWakeLockIfNeededLocked()
       val task = ScheduledTask(
         id = intId,
         callback = callback,
@@ -204,92 +325,269 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
         mode = normalizedKind,
         intervalMs = normalizedIntervalMs,
         driftPolicy = driftPolicy,
-        maxRuns = normalizedMaxRuns,
+        maxRuns = if (maxRuns <= 0.0) null else maxRuns.toInt(),
         group = normalizedGroup
       )
       tasksById[intId] = task
       queue.add(task)
-      scheduleNextTickLocked()
+      scheduleNextTickKotlinLocked()
     }
     return id
   }
 
   override fun cancel(id: Double) {
     val intId = id.toInt()
-    synchronized(stateLock) {
-      tasksById.remove(intId)
-      scheduleNextTickLocked()
+    if (useCpp) {
+      synchronized(cppSync) {
+        if (cppHandle != 0L) {
+          SchedulerNative.nativeCancel(cppHandle, intId)
+        }
+        cppCallbacks.remove(intId)
+        scheduleNextTickCppLocked()
+      }
+    } else {
+      synchronized(stateLock) {
+        tasksById.remove(intId)
+        scheduleNextTickKotlinLocked()
+      }
     }
     releaseWakeLockIfNeeded()
   }
 
-  override fun pauseGroup(group: String): Double {
-    synchronized(stateLock) {
-      var affected = 0
-      for (task in tasksById.values) {
-        if (task.group == group && !task.paused) {
-          task.paused = true
-          affected += 1
+  override fun pauseGroup(group: String): Double =
+    if (useCpp) {
+      synchronized(cppSync) {
+        val n =
+          if (
+            cppHandle != 0L
+          )
+            SchedulerNative.nativePauseGroup(
+              cppHandle,
+              group,
+            )
+          else 0
+        scheduleNextTickCppLocked()
+        n.toDouble()
+      }
+    } else {
+      synchronized(stateLock) {
+        var affected = 0
+        for (task in tasksById.values) {
+          if (task.group == group && !task.paused) {
+            task.paused = true
+            affected += 1
+          }
         }
+        scheduleNextTickKotlinLocked()
+        affected.toDouble()
       }
-      scheduleNextTickLocked()
-      return affected.toDouble()
     }
-  }
 
-  override fun resumeGroup(group: String): Double {
-    synchronized(stateLock) {
-      var affected = 0
-      val now = System.currentTimeMillis()
-      for (task in tasksById.values) {
-        if (task.group == group && task.paused) {
-          task.paused = false
-          task.nextRunAtMs = maxOf(task.nextRunAtMs, now + 1L)
-          queue.add(task)
-          affected += 1
+  override fun resumeGroup(group: String): Double =
+    if (useCpp) {
+      synchronized(cppSync) {
+        val now = System.currentTimeMillis()
+        val n =
+          if (
+            cppHandle != 0L
+          )
+            SchedulerNative.nativeResumeGroup(
+              cppHandle,
+              now,
+              group,
+            )
+          else 0
+        scheduleNextTickCppLocked()
+        n.toDouble()
+      }
+    } else {
+      synchronized(stateLock) {
+        var affected = 0
+        val now = System.currentTimeMillis()
+        for (task in tasksById.values) {
+          if (task.group == group && task.paused) {
+            task.paused = false
+            task.nextRunAtMs = maxOf(task.nextRunAtMs, now + 1L)
+            queue.add(task)
+            affected += 1
+          }
         }
+        scheduleNextTickKotlinLocked()
+        affected.toDouble()
       }
-      scheduleNextTickLocked()
-      return affected.toDouble()
+    }
+
+  override fun cancelGroup(group: String): Double =
+    if (useCpp) {
+      synchronized(cppSync) {
+        val removed =
+          if (
+            cppHandle != 0L
+          )
+            SchedulerNative.nativeCancelGroup(
+              cppHandle,
+              group,
+            )
+          else 0
+        if (cppHandle != 0L) {
+          val keep = SchedulerNative.nativeListActiveIds(cppHandle).toSet()
+          cppCallbacks.keys.removeAll { it !in keep }
+        }
+        scheduleNextTickCppLocked()
+        removed.toDouble()
+      }
+    } else {
+      synchronized(stateLock) {
+        val ids = tasksById.values.filter { it.group == group }.map { it.id }
+        for (subId in ids) {
+          tasksById.remove(subId)
+        }
+        scheduleNextTickKotlinLocked()
+        ids.size.toDouble()
+      }
+    }
+
+  override fun listActiveTimerIds(): DoubleArray =
+    if (useCpp) {
+      synchronized(cppSync) {
+        if (cppHandle == 0L) return DoubleArray(0)
+        SchedulerNative.nativeListActiveIds(cppHandle)
+          .sorted()
+          .map { it.toDouble() }
+          .toDoubleArray()
+      }
+    } else {
+      synchronized(stateLock) {
+        tasksById.keys.sorted().map { it.toDouble() }.toDoubleArray()
+      }
+    }
+
+  override fun getPersistWireJson(): String =
+    if (useCpp) {
+      synchronized(cppSync) {
+        if (cppHandle == 0L) {
+          return JSONObject().apply {
+            put("version", 1)
+            put("tasks", JSONArray())
+          }.toString()
+        }
+        SchedulerNative.nativeExportPersistWireJson(cppHandle)
+      }
+    } else {
+      synchronized(stateLock) {
+        val arr = JSONArray()
+        for ((id, t) in tasksById) {
+          arr.put(
+            JSONObject().apply {
+              put("id", id)
+              put("dueAtMs", t.nextRunAtMs)
+              put("kind", t.mode)
+              put("intervalMs", t.intervalMs)
+              put("group", t.group)
+              put("driftPolicy", t.driftPolicy)
+              put("maxRuns", t.maxRuns ?: -1)
+              put("runCount", t.runCount)
+              put("paused", t.paused)
+            }
+          )
+        }
+        JSONObject().apply {
+          put("version", 1)
+          put("tasks", arr)
+        }.toString()
+      }
+    }
+
+  override fun restorePersistWireJson(wireJson: String) {
+    if (useCpp) {
+      synchronized(cppSync) {
+        if (cppHandle == 0L) return
+        val root = JSONObject(wireJson)
+        if (root.optInt("version") != 1) return
+        cppCallbacks.clear()
+        SchedulerNative.nativeClearAll(cppHandle)
+        val tasks = root.getJSONArray("tasks")
+        for (i in 0 until tasks.length()) {
+          val o = tasks.getJSONObject(i)
+          SchedulerNative.nativeImportTask(
+            cppHandle,
+            o.getInt("id"),
+            o.getLong("dueAtMs"),
+            o.getString("kind"),
+            o.getLong("intervalMs"),
+            o.optString("group", DEFAULT_GROUP),
+            o.optString("driftPolicy", "coalesce"),
+            o.optInt("maxRuns", SCHED_MAX_RUN_UNLIMITED),
+            o.optInt("runCount", 0),
+            o.optBoolean("paused", false),
+          )
+        }
+        scheduleNextTickCppLocked()
+      }
+      releaseWakeLockIfNeeded()
+    } else {
+      Log.w(
+        "NitroBackgroundTimer",
+        "restorePersistWireJson skipped: native persistence restore requires USE_CPP_SCHEDULER=true"
+      )
     }
   }
 
-  override fun cancelGroup(group: String): Double {
-    synchronized(stateLock) {
-      val ids = tasksById.values.filter { it.group == group }.map { it.id }
-      for (id in ids) {
-        tasksById.remove(id)
+  override fun getStatsJson(): String =
+    if (useCpp) {
+      synchronized(cppSync) {
+        val st =
+          if (
+            cppHandle != 0L
+          )
+            SchedulerNative.nativeGetCoreStats(
+              cppHandle,
+            )
+          else longArrayOf(0, 0, 0, 0)
+        val groupsJsonRaw =
+          if (
+            cppHandle != 0L
+          )
+            SchedulerNative.nativeGetGroupsJson(
+              cppHandle,
+            )
+          else "{}"
+        val groupsParsed = JSONObject(groupsJsonRaw)
+        JSONObject().apply {
+          put("activeCount", if (st.isNotEmpty()) st[0].toInt() else 0)
+          put("callbackCount", if (st.size > 1) st[1] else 0L)
+          put("missedCount", if (st.size > 2) st[2] else 0L)
+          put("wakeupCount", if (st.size > 3) st[3] else 0L)
+          put("lateDispatchCount", lateDispatchCount)
+          put(
+            "avgLatenessMs",
+            if (lateDispatchCount == 0L) 0 else latenessTotalMs / lateDispatchCount
+          )
+          put("p95LatenessMs", p95LatenessMs)
+          put("groups", groupsParsed)
+        }.toString()
       }
-      scheduleNextTickLocked()
-      return ids.size.toDouble()
-    }
-  }
-
-  override fun listActiveTimerIds(): DoubleArray {
-    synchronized(stateLock) {
-      return tasksById.keys.sorted().map { it.toDouble() }.toDoubleArray()
-    }
-  }
-
-  override fun getStatsJson(): String {
-    synchronized(stateLock) {
-      val groups = JSONObject()
-      val grouped = tasksById.values.groupBy { it.group }
-      for ((group, groupTasks) in grouped) {
-        groups.put(group, groupTasks.size)
+    } else {
+      synchronized(stateLock) {
+        val groups = JSONObject()
+        for ((gName, lst) in tasksById.values.groupBy { it.group }) {
+          groups.put(gName, lst.size)
+        }
+        JSONObject().apply {
+          put("activeCount", tasksById.size)
+          put("callbackCount", callbackCount)
+          put("missedCount", missedCount)
+          put("wakeupCount", wakeupCount)
+          put("lateDispatchCount", lateDispatchCount)
+          put(
+            "avgLatenessMs",
+            if (lateDispatchCount == 0L) 0 else latenessTotalMs / lateDispatchCount
+          )
+          put("p95LatenessMs", p95LatenessMs)
+          put("groups", groups)
+        }.toString()
       }
-      val json = JSONObject()
-      json.put("activeCount", tasksById.size)
-      json.put("callbackCount", callbackCount)
-      json.put("missedCount", missedCount)
-      json.put("wakeupCount", wakeupCount)
-      json.put("lateDispatchCount", lateDispatchCount)
-      json.put("avgLatenessMs", if (lateDispatchCount == 0L) 0 else latenessTotalMs / lateDispatchCount)
-      json.put("p95LatenessMs", p95LatenessMs)
-      json.put("groups", groups)
-      return json.toString()
     }
-  }
 
   override fun setTimeout(id: Double, duration: Double, callback: (Double) -> Unit): Double {
     return schedule(
@@ -326,11 +624,18 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
   }
 
   override fun dispose() {
+    handler.removeCallbacks(tickKotlinRunnable)
+    handler.removeCallbacks(cppTickRunnable)
+    synchronized(cppSync) {
+      if (cppHandle != 0L) {
+        SchedulerNative.nativeDestroy(cppHandle)
+        cppHandle = 0L
+      }
+      cppCallbacks.clear()
+    }
     synchronized(stateLock) {
       tasksById.clear()
       queue.clear()
-      handler.removeCallbacks(tickRunnable)
-      tickScheduled = false
       if (wakeLock.isHeld) {
         wakeLock.release()
       }

@@ -1,13 +1,15 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>  // recursive_mutex
 #include <optional>
 #include <queue>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-namespace margelo::nitro::backgroundtimer {
+/** Native scheduler impl; MUST NOT live under margelo::nitro::backgroundtimer (Nitrogen reserves that ns). */
+namespace nitro_bt_scheduler {
 
 struct TaskRecord {
   int32_t id;
@@ -40,6 +42,22 @@ class SchedulerCore {
   std::vector<int32_t> listActiveIds() const;
   SchedulerStats getStats() const;
 
+  /** Compact JSON map of group -> active count, e.g. {"default":2} */
+  std::string getGroupsJson() const;
+
+  /** Next due timestamp in ms, or INT64_MIN if empty (caller treats as invalid). */
+  int64_t nextDueMs(int64_t nowMs) const;
+
+  bool isActive(int32_t id) const;
+
+  /** JSON wire snapshot for persistence (no JS callbacks). */
+  std::string exportPersistWireJson() const;
+
+  void clearAllTasks();
+
+  /** Used after `clearAllTasks()` to rebuild queue from persisted wire. */
+  void importTaskRecord(TaskRecord task);
+
  private:
   struct QueueEntry {
     int64_t dueAtMs;
@@ -54,6 +72,7 @@ class SchedulerCore {
   std::unordered_map<int32_t, uint64_t> generations_;
   std::priority_queue<QueueEntry> queue_;
   SchedulerStats stats_;
+  mutable std::recursive_mutex mutex_;
 };
 
-}  // namespace margelo::nitro::backgroundtimer
+}  // namespace nitro_bt_scheduler

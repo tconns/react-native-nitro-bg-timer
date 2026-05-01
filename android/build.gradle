@@ -44,6 +44,10 @@ android {
     minSdkVersion getExtOrIntegerDefault("minSdkVersion")
     targetSdkVersion getExtOrIntegerDefault("targetSdkVersion")
     buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+    def cppSchedulerProp =
+      (project.findProperty("nitro.bg.useCppScheduler") ?: "true").toString()
+    def useCppScheduler = !cppSchedulerProp.equalsIgnoreCase("false")
+    buildConfigField "boolean", "USE_CPP_SCHEDULER", "${useCppScheduler}"
 
     externalNativeBuild {
       cmake {

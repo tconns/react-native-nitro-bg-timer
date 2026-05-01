@@ -2,14 +2,18 @@
 //  NitroBackgroundTimer.swift
 //  NitroBackgroundTimer
 //
-//  Created by tconns94 on 8/21/2025.
-//
 
 import Foundation
 import UIKit
 import NitroModules
 
 class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
+  /// Default matches Android USE_CPP_SCHEDULER=true. Env `NITRO_BG_USE_LEGACY_SW_SCHEDULER=1` restores pure-Swift scheduler.
+  private static var useCppEngine: Bool {
+    ProcessInfo.processInfo.environment["NITRO_BG_USE_LEGACY_SW_SCHEDULER"]?.isEmpty == false ?
+      false : true
+  }
+
   private static let defaultGroup = "default"
 
   private struct ScheduledTask {
@@ -25,16 +29,28 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     let callback: (Double) -> Void
   }
 
+  private var cppBridge: SchedulerCppBridge?
+  private var cppCallbacks = [Int: (Double) -> Void]()
+
   private var bgTask: UIBackgroundTaskIdentifier = .invalid
   private var tasksById: [Int: ScheduledTask] = [:]
   private var schedulerTimer: Timer?
-  private var callbackCount: Int = 0
-  private var missedCount: Int = 0
-  private var wakeupCount: Int = 0
-  private var lateDispatchCount: Int = 0
-  private var latenessTotalMs: Double = 0
-  private var p95LatenessMs: Double = 0
+
+  private var callbackCount = 0
+  private var missedCount = 0
+  private var wakeupCount = 0
+
+  private var lateDispatchCount = 0
+  private var latenessTotalMs = 0.0
+  private var p95LatenessMs = 0.0
   private var latenessSamples: [Double] = []
+
+  override init() {
+    super.init()
+    if Self.useCppEngine {
+      cppBridge = SchedulerCppBridge()
+    }
+  }
 
   private func runOnMain(_ work: @escaping () -> Void) {
     if Thread.isMainThread {
@@ -44,28 +60,34 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     }
   }
 
-  // MARK: - Background task helpers
+  private func syncOnMain<T>(_ work: () -> T) -> T {
+    if Thread.isMainThread {
+      return work()
+    }
+    return DispatchQueue.main.sync(execute: work)
+  }
+
   private func acquireBackgroundTask() {
     guard bgTask == .invalid else { return }
-
     bgTask = UIApplication.shared.beginBackgroundTask(withName: "NitroBackgroundTimer") { [weak self] in
       self?.releaseBackgroundTask()
     }
-
     if bgTask == .invalid {
       print("[NitroBackgroundTimer] Warning: Failed to acquire background task")
     }
   }
 
   private func releaseBackgroundTaskIfNeeded() {
-    if tasksById.isEmpty {
+    if Self.useCppEngine {
+      guard let ids = cppBridge?.listActiveIds(), ids.isEmpty else { return }
       releaseBackgroundTask()
+    } else {
+      if tasksById.isEmpty { releaseBackgroundTask() }
     }
   }
 
   private func releaseBackgroundTask() {
     guard bgTask != .invalid else { return }
-
     UIApplication.shared.endBackgroundTask(bgTask)
     bgTask = .invalid
   }
@@ -85,7 +107,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     }
   }
 
-  private func ensureSchedulerTick() {
+  private func ensureSchedulerTickSwift() {
     schedulerTimer?.invalidate()
     schedulerTimer = nil
 
@@ -98,24 +120,47 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     let delayMs = max(0, nextTask.nextRunAtMs - Date().timeIntervalSince1970 * 1000)
     let delaySeconds = delayMs / 1000.0
     schedulerTimer = Timer.scheduledTimer(withTimeInterval: delaySeconds, repeats: false) { [weak self] _ in
-      self?.runDueTasks()
+      self?.runDueTasksSwift()
     }
   }
 
-  private func runDueTasks() {
+  private func ensureSchedulerTickCpp() {
+    schedulerTimer?.invalidate()
+    schedulerTimer = nil
+
+    guard let bridge = cppBridge else {
+      releaseBackgroundTask()
+      return
+    }
+
+    let nextDue = bridge.nextDueMs()
+    if nextDue == Int64.min {
+      releaseBackgroundTaskIfNeeded()
+      return
+    }
+
+    let now = Date().timeIntervalSince1970 * 1000
+    let delayMs = max(0, Double(nextDue) - now)
+    schedulerTimer =
+      Timer.scheduledTimer(withTimeInterval: delayMs / 1000.0, repeats: false) { [weak self] _ in
+        self?.runDueTasksCpp()
+      }
+  }
+
+  private func runDueTasksSwift() {
     let now = Date().timeIntervalSince1970 * 1000
     let dueIds = tasksById.values
       .filter { !$0.paused && $0.nextRunAtMs <= now }
-      .map { $0.id }
+      .map(\.id)
 
     if !dueIds.isEmpty {
       wakeupCount += 1
     }
 
-    for id in dueIds {
-      guard var task = tasksById[id] else { continue }
+    for tid in dueIds {
+      guard var task = tasksById[tid] else { continue }
       recordLateness(now - task.nextRunAtMs)
-      task.callback(Double(id))
+      task.callback(Double(tid))
       callbackCount += 1
       task.runCount += 1
 
@@ -129,17 +174,44 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
         default:
           nextRun = max(task.nextRunAtMs + task.intervalMs, now + 1)
         }
-        if nextRun < now {
-          missedCount += 1
-        }
+        if nextRun < now { missedCount += 1 }
         task.nextRunAtMs = nextRun
-        tasksById[id] = task
+        tasksById[tid] = task
       } else {
-        tasksById.removeValue(forKey: id)
+        tasksById.removeValue(forKey: tid)
       }
     }
 
-    ensureSchedulerTick()
+    ensureSchedulerTickSwift()
+  }
+
+  private func runDueTasksCpp() {
+    guard let bridge = cppBridge else { return }
+    let now = Int64(Date().timeIntervalSince1970 * 1000)
+    let pairs = bridge.popDuePairs(nowMs: now)
+    var i = 0
+    while i + 1 < pairs.count {
+      let tid = pairs[i].intValue
+      let scheduledDue = pairs[i + 1].int64Value
+      recordLateness(Double(now) - Double(scheduledDue))
+      cppCallbacks[tid]?(Double(tid))
+
+      syncCountersFromCpp(bridge)
+
+      if !bridge.isActive(timerId: tid) {
+        cppCallbacks.removeValue(forKey: tid)
+      }
+      i += 2
+    }
+    syncCountersFromCpp(bridge)
+    ensureSchedulerTickCpp()
+  }
+
+  private func syncCountersFromCpp(_ bridge: SchedulerCppBridge) {
+    let stats = bridge.coreStats()
+    callbackCount = stats["callbackCount"]?.intValue ?? callbackCount
+    missedCount = stats["missedCount"]?.intValue ?? missedCount
+    wakeupCount = stats["wakeupCount"]?.intValue ?? wakeupCount
   }
 
   func schedule(
@@ -151,8 +223,9 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     driftPolicy: String,
     maxRuns: Double,
     callback: @escaping (Double) -> Void
-  ) -> Double {
+  ) throws -> Double {
     let intId = Int(id)
+
     let normalizedKind = kind == "interval" ? "interval" : "timeout"
     let normalizedIntervalMs = max(1, intervalMs)
     let normalizedGroup = group.isEmpty ? Self.defaultGroup : group
@@ -160,8 +233,40 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
 
     runOnMain { [weak self] in
       guard let self else { return }
-      self.cancel(id: id)
+
+      let intExisting = Int(id)
+      if Self.useCppEngine, let bridgeExisting = self.cppBridge {
+        bridgeExisting.cancel(timerId: intExisting)
+        self.cppCallbacks.removeValue(forKey: intExisting)
+      } else {
+        self.tasksById.removeValue(forKey: intExisting)
+      }
+
       self.acquireBackgroundTask()
+
+      if Self.useCppEngine, let bridge = self.cppBridge {
+        let dueAt = Int64(Date().timeIntervalSince1970 * 1000 + max(0, delayMs))
+        let cppMaxRuns: Int =
+          normalizedKind == "timeout"
+            ? 1
+            : normalizedMaxRuns == nil ? Int(-1) : normalizedMaxRuns!
+        self.cppCallbacks[intId] = callback
+
+        bridge.schedule(
+          timerId: intId,
+          dueAtMs: dueAt,
+          kind: normalizedKind,
+          intervalMs: Int64(normalizedIntervalMs.rounded(.towardZero)),
+          group: normalizedGroup,
+          driftPolicy: driftPolicy,
+          maxRuns: cppMaxRuns
+        )
+
+        self.syncCountersFromCpp(bridge)
+        self.ensureSchedulerTickCpp()
+        return
+      }
+
       self.tasksById[intId] = ScheduledTask(
         id: intId,
         nextRunAtMs: Date().timeIntervalSince1970 * 1000 + max(0, delayMs),
@@ -174,71 +279,124 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
         paused: false,
         callback: callback
       )
-      self.ensureSchedulerTick()
+      self.ensureSchedulerTickSwift()
     }
 
     return id
   }
 
-  func cancel(id: Double) {
+  func cancel(id: Double) throws {
     let intId = Int(id)
+
     runOnMain { [weak self] in
       guard let self else { return }
-      self.tasksById.removeValue(forKey: intId)
-      self.ensureSchedulerTick()
+      if Self.useCppEngine, let bridge = self.cppBridge {
+        bridge.cancel(timerId: intId)
+        self.cppCallbacks.removeValue(forKey: intId)
+        self.syncCountersFromCpp(bridge)
+        self.ensureSchedulerTickCpp()
+      } else {
+        self.tasksById.removeValue(forKey: intId)
+        self.ensureSchedulerTickSwift()
+      }
     }
   }
 
-  func pauseGroup(group: String) -> Double {
+  func pauseGroup(group: String) throws -> Double {
     var affected = 0
     runOnMain { [weak self] in
       guard let self else { return }
-      for (id, var task) in self.tasksById where task.group == group && !task.paused {
-        task.paused = true
-        self.tasksById[id] = task
-        affected += 1
+      if Self.useCppEngine, let bridge = self.cppBridge {
+        affected = bridge.pause(group: group)
+        self.ensureSchedulerTickCpp()
+      } else {
+        for (tid, var task) in self.tasksById where task.group == group && !task.paused {
+          task.paused = true
+          self.tasksById[tid] = task
+          affected += 1
+        }
+        self.ensureSchedulerTickSwift()
       }
-      self.ensureSchedulerTick()
     }
     return Double(affected)
   }
 
-  func resumeGroup(group: String) -> Double {
+  func resumeGroup(group: String) throws -> Double {
     var affected = 0
     runOnMain { [weak self] in
       guard let self else { return }
-      let now = Date().timeIntervalSince1970 * 1000
-      for (id, var task) in self.tasksById where task.group == group && task.paused {
-        task.paused = false
-        task.nextRunAtMs = max(task.nextRunAtMs, now + 1)
-        self.tasksById[id] = task
-        affected += 1
+      if Self.useCppEngine, let bridge = self.cppBridge {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        affected = bridge.resume(group: group, nowMs: nowMs)
+        self.ensureSchedulerTickCpp()
+      } else {
+        let now = Date().timeIntervalSince1970 * 1000
+        for (tid, var task) in self.tasksById where task.group == group && task.paused {
+          task.paused = false
+          task.nextRunAtMs = max(task.nextRunAtMs, now + 1)
+          self.tasksById[tid] = task
+          affected += 1
+        }
+        self.ensureSchedulerTickSwift()
       }
-      self.ensureSchedulerTick()
     }
     return Double(affected)
   }
 
-  func cancelGroup(group: String) -> Double {
+  func cancelGroup(group: String) throws -> Double {
     var removed = 0
     runOnMain { [weak self] in
       guard let self else { return }
-      let ids = self.tasksById.values.filter { $0.group == group }.map(\.id)
-      removed = ids.count
-      for id in ids {
-        self.tasksById.removeValue(forKey: id)
+      if Self.useCppEngine, let bridge = self.cppBridge {
+        removed = bridge.cancel(group: group)
+        let alive = Set(bridge.listActiveIds().map { $0.intValue })
+        self.cppCallbacks = self.cppCallbacks.filter { alive.contains($0.key) }
+        self.ensureSchedulerTickCpp()
+      } else {
+        let ids = self.tasksById.values.filter { $0.group == group }.map(\.id)
+        removed = ids.count
+        for tid in ids { self.tasksById.removeValue(forKey: tid) }
+        self.ensureSchedulerTickSwift()
       }
-      self.ensureSchedulerTick()
     }
     return Double(removed)
   }
 
-  func listActiveTimerIds() -> [Double] {
-    tasksById.keys.sorted().map(Double.init)
+  func listActiveTimerIds() throws -> [Double] {
+    if Self.useCppEngine, let bridge = cppBridge {
+      return bridge.listActiveIds().map { Double($0.intValue) }.sorted()
+    }
+    return tasksById.keys.sorted().map(Double.init)
   }
 
-  func getStatsJson() -> String {
-    let groups = Dictionary(grouping: tasksById.values, by: \.group).mapValues(\.count)
+  func getStatsJson() throws -> String {
+    if Self.useCppEngine, let bridge = cppBridge {
+      syncCountersFromCpp(bridge)
+      let core = bridge.coreStats()
+      let gj = bridge.groupsJson().data(using: .utf8) ?? Data()
+      let groupsObj = (try? JSONSerialization.jsonObject(with: gj)) as? [String: Any] ?? [:]
+
+      let payload: [String: Any] = [
+        "activeCount": (core["activeCount"] as? NSNumber)?.intValue ?? bridge.listActiveIds().count,
+        "callbackCount": callbackCount,
+        "missedCount": missedCount,
+        "wakeupCount": wakeupCount,
+        "lateDispatchCount": lateDispatchCount,
+        "avgLatenessMs": lateDispatchCount == 0 ? 0 : latenessTotalMs / Double(lateDispatchCount),
+        "p95LatenessMs": p95LatenessMs,
+        "groups": groupsObj.mapValues { $0 as Any },
+      ]
+      guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+        return "{}"
+      }
+      return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    let groups =
+      Dictionary(uniqueKeysWithValues: Dictionary(grouping: tasksById.values, by: \.group).map {
+        ($0.key, $0.value.count)
+      })
+
     let payload: [String: Any] = [
       "activeCount": tasksById.count,
       "callbackCount": callbackCount,
@@ -247,18 +405,94 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
       "lateDispatchCount": lateDispatchCount,
       "avgLatenessMs": lateDispatchCount == 0 ? 0 : latenessTotalMs / Double(lateDispatchCount),
       "p95LatenessMs": p95LatenessMs,
-      "groups": groups,
+      "groups": groups.mapValues { $0 as Any },
     ]
 
-    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
-          let text = String(data: data, encoding: .utf8) else {
-      return "{\"activeCount\":0,\"callbackCount\":0,\"missedCount\":0,\"wakeupCount\":0,\"lateDispatchCount\":0,\"avgLatenessMs\":0,\"p95LatenessMs\":0,\"groups\":{}}"
+    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+      return "{}"
     }
-    return text
+    return String(data: data, encoding: .utf8) ?? "{}"
   }
 
-  func setTimeout(id: Double, duration: Double, callback: @escaping (Double) -> Void) -> Double {
-    schedule(
+  func getPersistWireJson() throws -> String {
+    syncOnMain {
+      if Self.useCppEngine, let bridge = cppBridge {
+        return bridge.exportPersistWireJson()
+      }
+      let tasksPayload: [[String: Any]] =
+        tasksById.keys.sorted().compactMap { key in
+          guard let task = tasksById[key] else { return nil }
+          return [
+            "id": task.id,
+            "dueAtMs": task.nextRunAtMs,
+            "kind": task.kind,
+            "intervalMs": task.intervalMs,
+            "group": task.group,
+            "driftPolicy": task.driftPolicy,
+            "maxRuns": task.maxRuns ?? -1,
+            "runCount": task.runCount,
+            "paused": task.paused,
+          ]
+        }
+      let payload: [String: Any] = ["version": 1, "tasks": tasksPayload]
+      guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+        return "{\"version\":1,\"tasks\":[]}"
+      }
+      return String(data: data, encoding: .utf8) ?? "{\"version\":1,\"tasks\":[]}"
+    }
+  }
+
+  func restorePersistWireJson(wireJson: String) throws {
+    syncOnMain {
+      if Self.useCppEngine, let bridge = cppBridge {
+        guard let data = wireJson.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ver = raw["version"] as? Int,
+              ver == 1,
+              let taskArr = raw["tasks"] as? [[String: Any]] else {
+          return
+        }
+        cppCallbacks.removeAll()
+        bridge.clearAllTasks()
+        for t in taskArr {
+          let idNum = (t["id"] as? NSNumber)?.intValue ?? 0
+          let dueMs = (t["dueAtMs"] as? NSNumber)?.doubleValue ?? 0
+          let due = Int64(dueMs.rounded())
+          let kindStr = (t["kind"] as? String) ?? "timeout"
+          let iv = Int64(((t["intervalMs"] as? NSNumber)?.doubleValue ?? 1).rounded())
+          let groupStr: String = {
+            if let g = t["group"] as? String, !g.isEmpty { return g }
+            return Self.defaultGroup
+          }()
+          let drift = (t["driftPolicy"] as? String) ?? "coalesce"
+          let maxRuns = (t["maxRuns"] as? NSNumber)?.intValue ?? -1
+          let runCnt = (t["runCount"] as? NSNumber)?.intValue ?? 0
+          let paused =
+            (t["paused"] as? Bool)
+              ?? ((t["paused"] as? NSNumber)?.boolValue ?? false)
+
+          bridge.importTask(
+            timerId: idNum,
+            dueAtMs: due,
+            kind: kindStr,
+            intervalMs: max(1, iv),
+            group: groupStr,
+            driftPolicy: drift,
+            maxRuns: maxRuns,
+            runCount: runCnt,
+            paused: paused
+          )
+        }
+        ensureSchedulerTickCpp()
+        releaseBackgroundTaskIfNeeded()
+        return
+      }
+      print("[NitroBackgroundTimer] restorePersistWireJson ignored in legacy Swift scheduler mode")
+    }
+  }
+
+  func setTimeout(id: Double, duration: Double, callback: @escaping (Double) -> Void) throws -> Double {
+    try schedule(
       id: id,
       delayMs: duration,
       kind: "timeout",
@@ -270,12 +504,12 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     )
   }
 
-  func clearTimeout(id: Double) {
-    cancel(id: id)
+  func clearTimeout(id: Double) throws {
+    try cancel(id: id)
   }
 
-  func setInterval(id: Double, interval: Double, callback: @escaping (Double) -> Void) -> Double {
-    schedule(
+  func setInterval(id: Double, interval: Double, callback: @escaping (Double) -> Void) throws -> Double {
+    try schedule(
       id: id,
       delayMs: interval,
       kind: "interval",
@@ -287,8 +521,8 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     )
   }
 
-  func clearInterval(id: Double) {
-    cancel(id: id)
+  func clearInterval(id: Double) throws {
+    try cancel(id: id)
   }
 
   deinit {
@@ -298,6 +532,8 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
       self.schedulerTimer?.invalidate()
       self.schedulerTimer = nil
       self.tasksById.removeAll()
+      self.cppCallbacks.removeAll()
+      self.cppBridge = nil
       if releasingTask != .invalid {
         UIApplication.shared.endBackgroundTask(releasingTask)
       }

@@ -1,6 +1,6 @@
 {
   "name": "react-native-nitro-bg-timer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "react-native-nitro-bg-timer is a react native package built with Nitro",
   "main": "lib/index",
   "module": "lib/index",
@@ -44,7 +44,9 @@
     "release:npm:provenance": "npm publish --access public --provenance",
     "benchmark:node": "node benchmarks/node-scheduler-benchmark.mjs",
     "benchmark:bridge": "node benchmarks/bridge-overhead-benchmark.mjs",
-    "verify:release": "npm run typecheck && npm run lint && npm run test && npm run typescript && npm run benchmark:node && npm run benchmark:bridge"
+    "stress:smoke": "tsx benchmarks/stress-runner.ts",
+    "benchmark:native-smoke": "bash scripts/ci-native-smoke.sh",
+    "verify:release": "npm run typecheck && npm run lint && npm run test && npm run typescript && npm run benchmark:native-smoke"
   },
   "keywords": [
     "react-native",
