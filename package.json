@@ -9,6 +9,8 @@
   "source": "src/index",
   "files": [
     "src",
+    "app.plugin.js",
+    "plugin",
     "react-native.config.js",
     "lib",
     "nitrogen",
@@ -80,6 +82,11 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
+  },
+  "expo": {
+    "plugins": [
+      "./app.plugin.js"
+    ]
   },
   "devDependencies": {
     "@react-native/babel-preset": "0.80.2",
@@ -154,6 +161,7 @@
     ]
   },
   "dependencies": {
+    "@expo/config-plugins": "^55.0.8",
     "eventemitter3": "^5.0.1"
   }
 }

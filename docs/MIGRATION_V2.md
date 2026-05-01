@@ -46,3 +46,11 @@ handle.cancel()
 2. Move one feature area to scheduler API.
 3. Validate behavior with `BackgroundTimer.getStats()` and event hooks.
 4. Expand migration to remaining call sites.
+
+## Expo projects
+
+- Expo Go is not supported because this library depends on native modules.
+- Use Expo Dev Client with prebuild:
+  1. add plugin in app config: `"plugins": ["react-native-nitro-bg-timer"]`
+  2. run `npx expo prebuild`
+  3. run `npx expo run:android` or `npx expo run:ios`

@@ -71,7 +71,17 @@ Last updated for: **1.x stabilization track**
 
 ---
 
-## 5) Next Milestones
+## 5) Ecosystem Compatibility
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Expo config plugin (`WAKE_LOCK` auto-injection) | ✅ done | Plugin shipped via `app.plugin.js` for prebuild/dev-client integration |
+| Expo SDK 55 validation lane | 🚧 in_progress | Manual host-app validation in progress on `expo-support` branch |
+| Expo installation docs (managed + bare) | ✅ done | Setup, prebuild flow, and troubleshooting documented in README |
+
+---
+
+## 6) Next Milestones
 
 | Milestone | Target State |
 | --- | --- |

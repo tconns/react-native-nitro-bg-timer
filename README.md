@@ -92,6 +92,49 @@ This library uses `PARTIAL_WAKE_LOCK` while timers are active.
 
 `FOREGROUND_SERVICE` is not required unless your app uses foreground services for other workloads.
 
+## Expo Integration (SDK 55+)
+
+This package contains native code, so Expo integration requires native project generation.
+
+- Expo Go: not supported for this library.
+- Expo Managed + Dev Client: supported via config plugin + prebuild.
+- Bare Expo projects: supported as a standard React Native native module.
+
+### app.json / app.config.js
+
+```json
+{
+  "expo": {
+    "plugins": ["react-native-nitro-bg-timer"]
+  }
+}
+```
+
+### Setup flow (Managed + Dev Client)
+
+```bash
+npx expo install react-native-nitro-bg-timer react-native-nitro-modules
+npx expo prebuild
+npx expo run:android
+# or
+npx expo run:ios
+```
+
+The included Expo config plugin automatically injects `android.permission.WAKE_LOCK` during prebuild.
+
+### Tested matrix
+
+| Expo SDK | React Native | Status |
+| --- | --- | --- |
+| 55 | 0.83.x (Expo default) | planned validation target on `expo-support` branch |
+| 54 | 0.81.x/0.82.x | expected to work; verify in host app |
+
+### Expo troubleshooting
+
+- Permission not present after install: run `npx expo prebuild --clean`.
+- Native changes not picked up: remove native folders and prebuild again.
+- Build fails after SDK upgrade: align Expo SDK + RN versions before prebuild.
+
 ---
 
 ## ⚡ Quick Start
