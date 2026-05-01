@@ -31,6 +31,7 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
   companion object {
     private const val DEFAULT_GROUP = "default"
     private const val LATENESS_SAMPLE_WINDOW = 256
+    private const val LATENESS_P95_RECALC_INTERVAL = 16
     private const val SCHED_MAX_RUN_UNLIMITED = -1
   }
 
@@ -67,6 +68,7 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
   private var latenessTotalMs = 0L
   private var p95LatenessMs = 0L
   private val latenessSamples = ArrayDeque<Long>()
+  private var latenessDirtyCount = 0
 
   init {
     tickKotlinRunnable = Runnable {
@@ -124,6 +126,11 @@ class NitroBackgroundTimer : HybridNitroBackgroundTimerSpec() {
     if (latenessSamples.size > LATENESS_SAMPLE_WINDOW) {
       latenessSamples.removeFirst()
     }
+    latenessDirtyCount += 1
+    if (latenessDirtyCount < LATENESS_P95_RECALC_INTERVAL) {
+      return
+    }
+    latenessDirtyCount = 0
     val sorted = latenessSamples.toList().sorted()
     if (sorted.isNotEmpty()) {
       val index = ((sorted.size - 1) * 0.95).roundToLong().toInt().coerceIn(0, sorted.size - 1)

@@ -29,7 +29,7 @@ Status values:
 | JS façade churn reduction | done | done | n/a | n/a | n/a | `stats` emitter throttled (~250 ms) on advanced schedules |
 | Benchmark baseline (scheduler throughput) | done | done | n/a | n/a | n/a | `benchmark:node` |
 | Bridge overhead benchmark (typed vs JSON path) | done | done | n/a | n/a | n/a | `benchmark:bridge` |
-| Native-path benchmark automation | done | smoke | smoke | smoke | smoke | Aggregated pipeline `benchmark:native-smoke` (+ `stress:smoke`); thresholds in `docs/NATIVE_BENCH_THRESHOLDS.md` |
+| Native-path benchmark automation | done | smoke | smoke | smoke | smoke | CI smoke (`benchmark:native-smoke`) + nightly Android/iOS compile lanes; thresholds in `docs/NATIVE_BENCH_THRESHOLDS.md` |
 
 ## Feature Expansion Roadmap
 
@@ -53,6 +53,6 @@ Status values:
 
 | Action | Owner | Target Date | Status |
 | --- | --- | --- | --- |
-| Add hosted emulator/Xcode smoke lane for JNI/Swift bridging | TBD | TBD | planned |
+| Add hosted iOS simulator app runtime lane for end-to-end callbacks | TBD | TBD | planned |
 | Promote richer retry/native token fields through Nitrogen | TBD | TBD | planned |
 | Teach `SchedulerCore` about optional opaque metadata keys | TBD | TBD | planned |

@@ -46,7 +46,7 @@ class SchedulerCore {
   std::string getGroupsJson() const;
 
   /** Next due timestamp in ms, or INT64_MIN if empty (caller treats as invalid). */
-  int64_t nextDueMs(int64_t nowMs) const;
+  int64_t nextDueMs(int64_t nowMs);
 
   bool isActive(int32_t id) const;
 
@@ -67,6 +67,7 @@ class SchedulerCore {
   };
 
   void requeue(TaskRecord& task, int64_t nowMs);
+  bool compactQueueHeadLocked();
 
   std::unordered_map<int32_t, TaskRecord> tasksById_;
   std::unordered_map<int32_t, uint64_t> generations_;

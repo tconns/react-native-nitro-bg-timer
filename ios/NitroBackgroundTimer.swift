@@ -15,6 +15,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   }
 
   private static let defaultGroup = "default"
+  private static let latenessP95RecalcInterval = 16
 
   private struct ScheduledTask {
     let id: Int
@@ -44,6 +45,7 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
   private var latenessTotalMs = 0.0
   private var p95LatenessMs = 0.0
   private var latenessSamples: [Double] = []
+  private var latenessDirtyCount = 0
 
   override init() {
     super.init()
@@ -100,6 +102,11 @@ class NitroBackgroundTimer: HybridNitroBackgroundTimerSpec {
     if latenessSamples.count > 256 {
       latenessSamples.removeFirst(latenessSamples.count - 256)
     }
+    latenessDirtyCount += 1
+    if latenessDirtyCount < Self.latenessP95RecalcInterval {
+      return
+    }
+    latenessDirtyCount = 0
     let sorted = latenessSamples.sorted()
     if !sorted.isEmpty {
       let idx = min(sorted.count - 1, Int(Double(sorted.count - 1) * 0.95))

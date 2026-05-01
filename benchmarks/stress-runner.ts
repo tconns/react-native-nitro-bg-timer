@@ -12,6 +12,10 @@ const N = 25_000
 
 function noopCallback(_id: number): void {}
 
+function readHeapMb(): number {
+  return process.memoryUsage().heapUsed / (1024 * 1024)
+}
+
 function runStressOnce(): { ms: number; n: number } {
   const timers = new Map<number, number>()
 
@@ -87,14 +91,38 @@ function runStressOnce(): { ms: number; n: number } {
 }
 
 function main(): void {
-  const { ms, n } = runStressOnce()
+  const rounds = Number(process.env.NITRO_BG_STRESS_ROUNDS ?? 5)
   const maxMsEnv = process.env.NITRO_BG_STRESS_MAX_MS
   const ceiling = maxMsEnv ? Number(maxMsEnv) : 800
+  const maxHeapDeltaMb = Number(process.env.NITRO_BG_STRESS_MAX_HEAP_MB ?? 32)
+  const timings: number[] = []
+  const heapBefore = readHeapMb()
+  let n = N
+
+  for (let i = 0; i < rounds; i += 1) {
+    const result = runStressOnce()
+    n = result.n
+    timings.push(result.ms)
+  }
+  const heapAfter = readHeapMb()
+  const heapDeltaMb = heapAfter - heapBefore
+  const sorted = [...timings].sort((a, b) => a - b)
+  const p50 = sorted[Math.floor((sorted.length - 1) * 0.5)] ?? 0
+  const p95 = sorted[Math.floor((sorted.length - 1) * 0.95)] ?? 0
+
   console.log(
-    `stress-runner: ${n} schedule/cancel/persist ops in ${ms.toFixed(1)}ms (ceiling ${ceiling}ms)`
+    `stress-runner: rounds=${rounds}, n=${n}, p50=${p50.toFixed(1)}ms, p95=${p95.toFixed(
+      1
+    )}ms, heapDelta=${heapDeltaMb.toFixed(2)}MB`
   )
-  if (ms > ceiling) {
+  if (p95 > ceiling) {
     console.error('stress-runner: exceeded ceiling — treat as regression signal')
+    process.exit(1)
+  }
+  if (heapDeltaMb > maxHeapDeltaMb) {
+    console.error(
+      `stress-runner: heap delta ${heapDeltaMb.toFixed(2)}MB exceeded max ${maxHeapDeltaMb}MB`
+    )
     process.exit(1)
   }
 }

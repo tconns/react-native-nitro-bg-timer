@@ -87,21 +87,13 @@ int32_t SchedulerCore::resumeGroup(const std::string& group, int64_t nowMs) {
 std::vector<TaskRecord> SchedulerCore::popDue(int64_t nowMs) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   std::vector<TaskRecord> due;
-  while (!queue_.empty()) {
+  while (compactQueueHeadLocked()) {
     const QueueEntry top = queue_.top();
     if (top.dueAtMs > nowMs) {
       break;
     }
     queue_.pop();
-    const auto generationIt = generations_.find(top.id);
-    if (generationIt == generations_.end() || generationIt->second != top.generation) {
-      continue;
-    }
     const auto taskIt = tasksById_.find(top.id);
-    if (taskIt == tasksById_.end() || taskIt->second.paused) {
-      continue;
-    }
-
     TaskRecord fired = taskIt->second;
     due.push_back(fired);
     stats_.callbackCount += 1;
@@ -138,6 +130,24 @@ void SchedulerCore::requeue(TaskRecord& task, int64_t nowMs) {
   }
   const uint64_t generation = ++generations_[task.id];
   queue_.push(QueueEntry{task.dueAtMs, task.id, generation});
+}
+
+bool SchedulerCore::compactQueueHeadLocked() {
+  while (!queue_.empty()) {
+    const QueueEntry top = queue_.top();
+    const auto generationIt = generations_.find(top.id);
+    if (generationIt == generations_.end() || generationIt->second != top.generation) {
+      queue_.pop();
+      continue;
+    }
+    const auto taskIt = tasksById_.find(top.id);
+    if (taskIt == tasksById_.end() || taskIt->second.paused) {
+      queue_.pop();
+      continue;
+    }
+    return true;
+  }
+  return false;
 }
 
 std::vector<int32_t> SchedulerCore::listActiveIds() const {
@@ -178,15 +188,12 @@ std::string SchedulerCore::getGroupsJson() const {
   return oss.str();
 }
 
-int64_t SchedulerCore::nextDueMs(int64_t /* nowMs */) const {
+int64_t SchedulerCore::nextDueMs(int64_t /* nowMs */) {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
-  int64_t minDue = INT64_MAX;
-  for (const auto& [_, t] : tasksById_) {
-    if (!t.paused) {
-      minDue = std::min(minDue, t.dueAtMs);
-    }
+  if (!compactQueueHeadLocked()) {
+    return INT64_MIN;
   }
-  return minDue == INT64_MAX ? INT64_MIN : minDue;
+  return queue_.top().dueAtMs;
 }
 
 bool SchedulerCore::isActive(int32_t id) const {

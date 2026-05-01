@@ -48,6 +48,7 @@ android {
       (project.findProperty("nitro.bg.useCppScheduler") ?: "true").toString()
     def useCppScheduler = !cppSchedulerProp.equalsIgnoreCase("false")
     buildConfigField "boolean", "USE_CPP_SCHEDULER", "${useCppScheduler}"
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
     externalNativeBuild {
       cmake {
@@ -140,6 +141,9 @@ dependencies {
 
   // Add a dependency on NitroModules
   implementation project(":react-native-nitro-modules")
+
+  androidTestImplementation "androidx.test:runner:1.6.2"
+  androidTestImplementation "androidx.test.ext:junit:1.2.1"
 }
 
 if (isNewArchitectureEnabled()) {
