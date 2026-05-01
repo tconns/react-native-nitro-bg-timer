@@ -36,6 +36,16 @@ See `docs/RELEASE_GOVERNANCE.md` and `docs/FEATURE_UPGRADE_STATUS.md` for releas
 - 📊 Stats and lifecycle events for production observability
 - 🛡️ Retry/token/profile metadata flow with validation safeguards
 
+## C++ and Native Performance Proof
+
+This module runs critical scheduling paths in native code (C++ core + Swift/Kotlin adapters) instead of keeping hot scheduling loops in JavaScript.
+
+- Typed bridge overhead improvement: about `99%` faster than JSON bridge path (`benchmark:bridge`).
+- Native C++ core load benchmark: around `15ms` for `50,000` tasks on recent CI runs (`benchmark:core-native`).
+- Stress smoke signal: `p95 ~ 3.5ms`, heap delta about `4.6MB` (`stress:smoke`).
+
+These numbers come from the current release verification lane (`npm run verify:release`) and are intended as practical indicators, not synthetic peak claims.
+
 ---
 
 ## 📦 Requirements
@@ -224,9 +234,16 @@ npm run verify:release
 
 ---
 
+## Acknowledgements
+
+Special thanks to the following open-source projects which inspired and supported the development of this library:
+
+- [mrousavy/nitro](https://github.com/mrousavy/nitro) – for the Nitro Modules architecture and tooling
+
 ## 📄 License
 
 MIT © [Thành Công](https://github.com/tconns)
+
 
 <a href="https://www.buymeacoffee.com/tconns94" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" width="200"/>
